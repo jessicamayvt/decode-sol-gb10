@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nvidia-smi:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(ls:*)",
+      "Bash(pytest:*)",
+      "Bash(pre-commit run:*)",
+      "Bash(ruff:*)",
+      "Bash(mypy:*)"
+    ],
+    "deny": [
+      "Bash(sudo:*)",
+      "Bash(podman:*)",
+      "Bash(docker:*)",
+      "Bash(rm -rf ~:*)",
+      "Bash(rm -rf /:*)",
+      "Bash(git push --force:*)",
+      "Bash(nvidia-smi -pl:*)",
+      "Bash(nvidia-smi -lgc:*)",
+      "Bash(nvidia-smi -ac:*)"
+    ]
+  },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  }
+}
