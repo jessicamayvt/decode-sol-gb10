@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "decode-sol"
+version = "0.1.0"
+description = "Speed of light for LLM decode on an NVIDIA GB10"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "vllm==0.33.0",
+    "nvidia-ml-py==13.615.71",
+    "numpy==2.3.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff==0.17.5",
+    "mypy==2.4.1",
+    "pytest==9.2.0",
+    "pre-commit==4.7.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+# torch.cuda.Event has no annotations in torch 2.14.
+untyped_calls_exclude = ["torch.cuda"]
+
+[[tool.mypy.overrides]]
+module = ["pynvml"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["gpu: needs the GB10; run only while the human is watching"]
+addopts = "--strict-markers"

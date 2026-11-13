@@ -8,3 +8,4 @@ profiles/
 *.nsys-rep
 *.qdrep
 *.pt.trace.json
+*.egg-info/
