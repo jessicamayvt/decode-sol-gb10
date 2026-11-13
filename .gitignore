@@ -9,3 +9,6 @@ profiles/
 *.qdrep
 *.pt.trace.json
 *.egg-info/
+
+# Local agent kickoff notes, not published
+KICKOFF.md
