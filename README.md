@@ -61,5 +61,5 @@ This runs on a shared teaching GPU, so vLLM is capped at `gpu_memory_utilization
 
 - [`docs/PROJECT_BRIEF.md`](docs/PROJECT_BRIEF.md): full method, sweep grid and milestones
 - [`docs/SETUP.md`](docs/SETUP.md): exact install steps and workarounds
-- `docs/MODEL.md`: roofline derivation and assumptions (coming in milestone M1)
+- [`docs/MODEL.md`](docs/MODEL.md): roofline derivation and assumptions
 - `docs/REPORT.md`: write-up of the results (coming in milestone M5)
