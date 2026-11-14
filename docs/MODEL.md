@@ -65,3 +65,13 @@ These make the prediction a lower bound on step time, and so an upper bound on t
 ## Energy
 
 `src/decode_sol/energy.py` differences the NVML total-energy counter (`nvmlDeviceGetTotalEnergyConsumption`, millijoules) around a timed region. It covers the **GPU only**. On this machine the counter advances every 100 ms, so each end of a window can be stale by up to 100 ms. Windows therefore need to last several seconds to keep that error small. Idle power is measured over 30 s with `python -m decode_sol.energy` and recorded in `results/raw/idle_power.jsonl`.
+
+## Measuring decode
+
+`src/decode_sol/measure.py` loads one model in vLLM's offline `LLM` and generates the same batch of exact-length random prompts (token ids below the tokenizer's `vocab_size`, so no special tokens) at 16 and then 144 output tokens, alternately: 2 warmup pairs, then 10 timed pairs. Sampling is greedy with `ignore_eos=True`, and every output is checked to have exactly the requested length. Prefix caching is off. Detokenization is left on, as in normal serving, so its CPU cost is part of the measured step time.
+
+Both generations of a pair pay the same prefill, so `src/decode_sol/analyze.py` takes the decode step time as `(long_duration - short_duration) / 128` and the GPU energy per token as `(long_energy - short_energy) / (batch_size * 128)`. Medians across pairs come with a percentile-bootstrap 95% confidence interval.
+
+The idle baseline for decode energy is measured over 30 s **with the model loaded**, just before timing. On the GB10 this reads about 10.6 W, roughly twice the 4.8 W of a GPU with no process on it, so "above idle" figures depend on which baseline is used. Every record stores its own baseline, and energy is reported both with and without it.
+
+At batch 1, the short generation lasts about 0.35 s, only a few ticks of the 100 ms energy counter, so the energy of a single pair is uncertain by roughly 10%. The median over 10 pairs narrows this to a few percent.
