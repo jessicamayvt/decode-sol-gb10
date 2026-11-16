@@ -70,6 +70,15 @@ export HF_HOME=/tmp/$USER/hf        # model weights on local NVMe, not home
 export CPATH=...                    # see above
 ```
 
+`scripts/run_sweep.sh` sets all three, so measurements are started through it:
+
+```bash
+bash scripts/run_sweep.sh --model Qwen/Qwen3-1.7B --grid smoke --kv-cache-dtype auto
+bash scripts/run_sweep.sh --timeout 2h --model Qwen/Qwen3-8B --grid full --kv-cache-dtype fp8
+```
+
+The default timeout is 45 minutes; `python -m decode_sol.grid` estimates how long each sweep needs.
+
 ## Smoke test (M0)
 
 Qwen/Qwen3-0.6B, `gpu_memory_utilization=0.25`, greedy, 2 prompts × 40 tokens: generation succeeded.

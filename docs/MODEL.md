@@ -74,4 +74,15 @@ Both generations of a pair pay the same prefill, so `src/decode_sol/analyze.py` 
 
 The idle baseline for decode energy is measured over 30 s **with the model loaded**, just before timing. On the GB10 this reads about 10.6 W, roughly twice the 4.8 W of a GPU with no process on it, so "above idle" figures depend on which baseline is used. Every record stores its own baseline, and energy is reported both with and without it.
 
+## Sweeping the grid
+
+`src/decode_sol/grid.py` defines the grid and decides which points can be measured. A sweep (`scripts/run_sweep.sh`) is one model at one KV cache dtype, in one process, so the model loads once. The process is sized for the whole grid: `max_num_seqs` is the largest batch size and `max_model_len` the longest context plus 144.
+
+A point is skipped, with the reason logged, when either:
+
+- its batch needs more KV cache blocks than vLLM reported at startup (`batch_size * ceil((context_len + 144) / 16)`), because vLLM would then run the batch as several smaller ones instead of failing; or
+- its prefill takes more than 16 steps. vLLM prefills a batch in chunks of `max_num_batched_tokens` and starts decoding each sequence as soon as its own prefill is done. The two generations of a pair share the same prefill phase, including the staggered starts, only if no sequence finishes its 16-token short generation before the last sequence starts decoding. `max_num_batched_tokens` is set to 32768 so that every point that fits in the cache also meets this condition.
+
+`python -m decode_sol.grid` prints this plan before a sweep, with an estimate of the GPU minutes. The estimate assumes decode at 0.65 of the achievable ceiling (M2's efficiency), prefill at 50 TFLOP/s, 6 GiB of non-KV memory reserved by vLLM, and 3 minutes of startup per process. It is a planning number; the real capacity and times come from the run.
+
 At batch 1, the short generation lasts about 0.35 s, only a few ticks of the 100 ms energy counter, so the energy of a single pair is uncertain by roughly 10%. The median over 10 pairs narrows this to a few percent.
