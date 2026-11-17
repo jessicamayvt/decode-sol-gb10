@@ -34,10 +34,10 @@ LONG_OUTPUT_LEN = 144
 NUM_WARMUP_PAIRS = 2
 NUM_TIMED_PAIRS = 10
 
-# Tokens vLLM may prefill in one step. Sequences of a batch start decoding as their prefill
-# finishes, so a batch's prefill must take at most SHORT_OUTPUT_LEN steps, or the earliest
-# sequence finishes its short generation before the last one starts decoding and the two
-# generations of a pair no longer share the same prefill phase (docs/MODEL.md).
+# Most tokens vLLM may prefill in one step. Sequences of a batch start decoding as their
+# prefill finishes, so a batch's prefill must take at most SHORT_OUTPUT_LEN steps, or the
+# earliest sequence finishes its short generation before the last one starts decoding and
+# the two generations of a pair no longer share the same prefill phase (docs/MODEL.md).
 MAX_NUM_BATCHED_TOKENS = 32768
 
 SWEEP_MODELS = ("Qwen/Qwen3-1.7B", "Qwen/Qwen3-4B", "Qwen/Qwen3-8B")
@@ -86,6 +86,16 @@ class Grid:
     @property
     def max_context_len(self) -> int:
         return max(self.context_lens)
+
+    @property
+    def max_model_len(self) -> int:
+        return self.max_context_len + LONG_OUTPUT_LEN
+
+    @property
+    def max_num_batched_tokens(self) -> int:
+        """vLLM's warmup overruns its request buffers if a prefill step could hold more
+        tokens than max_num_seqs sequences of max_model_len, so the budget is capped there."""
+        return min(MAX_NUM_BATCHED_TOKENS, self.max_batch_size * self.max_model_len)
 
 
 GRID_BY_NAME = {
@@ -210,7 +220,7 @@ def plan_sweep(
             point,
             num_gpu_blocks=num_gpu_blocks,
             block_size=VLLM_BLOCK_SIZE,
-            max_num_batched_tokens=MAX_NUM_BATCHED_TOKENS,
+            max_num_batched_tokens=grid.max_num_batched_tokens,
         )
         duration_s_by_point[point] = estimate_point_duration_s(
             point,
@@ -247,7 +257,9 @@ def log_sweep_plan(plan: SweepPlan) -> None:
         if skip_reason is None:
             logger.info("  %5d  %7d  %9.1f", point.batch_size, point.context_len, minutes)
         else:
-            logger.info("  %5d  %7d  %9s  %s", point.batch_size, point.context_len, "-", skip_reason)
+            logger.info(
+                "  %5d  %7d  %9s  %s", point.batch_size, point.context_len, "-", skip_reason
+            )
     logger.info(
         "  %d of %d points fit, est. %.0f min including %.0f s startup and idle baseline",
         len(plan.feasible_points),

@@ -27,7 +27,6 @@ from decode_sol.energy import (
 from decode_sol.grid import (
     GRID_BY_NAME,
     LONG_OUTPUT_LEN,
-    MAX_NUM_BATCHED_TOKENS,
     NUM_TIMED_PAIRS,
     NUM_WARMUP_PAIRS,
     SHORT_OUTPUT_LEN,
@@ -122,9 +121,9 @@ def load_llm(config: SweepConfig, *, revision: str) -> LLM:
         dtype=WEIGHT_DTYPE,
         kv_cache_dtype=config.kv_cache_dtype,
         gpu_memory_utilization=config.gpu_memory_utilization,
-        max_model_len=config.grid.max_context_len + LONG_OUTPUT_LEN,
+        max_model_len=config.grid.max_model_len,
         max_num_seqs=config.grid.max_batch_size,
-        max_num_batched_tokens=MAX_NUM_BATCHED_TOKENS,
+        max_num_batched_tokens=config.grid.max_num_batched_tokens,
         enable_prefix_caching=False,
         seed=PROMPT_SEED,
     )
@@ -144,9 +143,9 @@ def collect_sweep_metadata(
         "kv_cache_dtype": config.kv_cache_dtype,
         "gpu_memory_utilization": config.gpu_memory_utilization,
         "grid": config.grid_name,
-        "max_model_len": config.grid.max_context_len + LONG_OUTPUT_LEN,
+        "max_model_len": config.grid.max_model_len,
         "max_num_seqs": config.grid.max_batch_size,
-        "max_num_batched_tokens": MAX_NUM_BATCHED_TOKENS,
+        "max_num_batched_tokens": config.grid.max_num_batched_tokens,
         "enable_prefix_caching": False,
         "enforce_eager": False,
         "kv_cache_size_tokens": cache_config.kv_cache_size_tokens,
@@ -208,7 +207,7 @@ def main() -> None:
                 point,
                 num_gpu_blocks=num_gpu_blocks,
                 block_size=cache_config.block_size,
-                max_num_batched_tokens=MAX_NUM_BATCHED_TOKENS,
+                max_num_batched_tokens=config.grid.max_num_batched_tokens,
             )
             if skip_reason is not None:
                 logger.warning("Skipping %s: %s", point, skip_reason)

@@ -46,6 +46,11 @@ def test_smoke_grid_is_the_m2_point() -> None:
     assert GRID_BY_NAME["smoke"].points == [GridPoint(batch_size=1, context_len=512)]
 
 
+def test_prefill_budget_is_capped_by_what_the_grid_sequences_can_hold() -> None:
+    assert GRID_BY_NAME["smoke"].max_num_batched_tokens == 1 * (512 + LONG_OUTPUT_LEN)
+    assert GRID_BY_NAME["full"].max_num_batched_tokens == 32768
+
+
 def test_point_fits_when_its_blocks_exactly_match_the_cache() -> None:
     # Each sequence holds 512 + 144 tokens = 41 blocks of 16.
     point = GridPoint(batch_size=2, context_len=512)
