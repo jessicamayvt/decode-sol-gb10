@@ -47,7 +47,8 @@ Load the matching skill before starting the work, not after.
 | `src/decode_sol/guard.py` | Memory cap, other-GPU-user check, run metadata |
 | `src/decode_sol/measure.py` | One model per process, many grid points, raw JSONL out |
 | `src/decode_sol/grid.py` | Sweep definition and feasibility filter |
-| `src/decode_sol/analyze.py` | Summaries, efficiency, gap model |
+| `src/decode_sol/analyze.py` | Pools repeats into `results/summary.csv`: step time, efficiency, GPU energy |
+| `src/decode_sol/gap_model.py` | Linear model of efficiency, fitted to `results/summary.csv` |
 | `src/decode_sol/plots.py` | Every figure |
 | `scripts/` | `setup_env.sh`, `run_sweep.sh` |
 | `results/raw/` | Append-only measurement records. Never edit or delete them. |

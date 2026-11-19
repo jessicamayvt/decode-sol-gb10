@@ -1,0 +1,37 @@
+{
+  "num_points": 128,
+  "r_squared": 0.32670455525141817,
+  "residual_std": 0.05019090013335987,
+  "coefficients": [
+    {
+      "feature": "intercept",
+      "estimate": 0.774790610473553,
+      "ci_low": 0.7363056856214386,
+      "ci_high": 0.8168704435184753
+    },
+    {
+      "feature": "log2_batch_size",
+      "estimate": 0.016389766640791458,
+      "ci_low": 0.00959467141218855,
+      "ci_high": 0.022995463375954105
+    },
+    {
+      "feature": "log2_context_len_over_512",
+      "estimate": 0.004172662044076813,
+      "ci_low": -0.0006047654666000363,
+      "ci_high": 0.00874025513441031
+    },
+    {
+      "feature": "log2_num_weight_params_over_1e9",
+      "estimate": 0.022159966093701394,
+      "ci_low": 0.012464982638624915,
+      "ci_high": 0.03183461834232656
+    },
+    {
+      "feature": "is_fp8_kv_cache",
+      "estimate": -0.020223448711112903,
+      "ci_low": -0.03754442240139442,
+      "ci_high": -0.0028106311976912944
+    }
+  ]
+}
