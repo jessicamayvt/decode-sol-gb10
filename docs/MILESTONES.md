@@ -45,15 +45,17 @@ Qwen/Qwen3-1.7B (revision `70d244c`), batch 1, context 512, bf16 weights and KV 
 1. The first record is this point run before the code was committed (`has_uncommitted_changes: true`). It agrees with the second within 0.2%. It is kept because results are append-only.
 2. The second record, the one in the table above, names commit `04ee59e`. That commit was later rewritten as `11182e4` to change only its message. The code is identical.
 
-## M3: Sweep (in progress)
+## M3: Sweep
 
-**Commits:** `1c52d03` (sweep tooling), `59f84c5` (warmup fix), `32f512b`, `40d8afd`, `e634e6e` (repeat 1 results)
+**Commits:** `1c52d03` (sweep tooling), `59f84c5` (warmup fix), `32f512b`, `40d8afd`, `e634e6e` (repeat 1 results), `320f285` (repeat 2 results), `5553bab` (repeat 3 results)
 
-The grid is Qwen3-1.7B, 4B and 8B (bf16 weights) × KV cache dtype auto (bf16) and fp8 × batch 1–64 × context 512, 2048, 8192 and 32768: 6 sweeps of 28 points each, run 3 times. `python -m decode_sol.grid` printed the feasible points and estimated 689 GPU minutes per repeat before anything ran. Each sweep runs through `scripts/run_sweep.sh` under the 0.25 memory cap. `measure.py` skips any point whose KV cache won't fit in the blocks vLLM actually allocates and logs why.
+The grid is Qwen3-1.7B, 4B and 8B (bf16 weights) × KV cache dtype auto (bf16) and fp8 × batch 1–64 × context 512, 2048, 8192 and 32768: 6 sweeps of 28 points each, run 3 times. `python -m decode_sol.grid` printed the feasible points and estimated 689 GPU minutes per repeat before anything ran. Each sweep ran through `scripts/run_sweep.sh` under the 0.25 memory cap. `measure.py` skips any point whose KV cache won't fit in the blocks vLLM actually allocates and logs why.
 
-### Repeat 1: complete
+Repeat 1 ran on 2026-11-17 and 18. Repeats 2 and 3 ran one sweep after another from 2026-11-18 06:19 UTC to 2026-11-19 07:20 UTC, about 0.7× the planner's time estimate. In total there are **374 records over 128 distinct grid points**. Repeats are told apart by `timestamp_utc`.
 
-| Model | KV dtype | Points | KV cache blocks (planned / allocated) | Efficiency range | b1, c512 step time | Energy/token above idle (b1, c512) |
+### Repeat 1
+
+| Model | KV dtype | Points | KV cache blocks (planned / allocated) | Efficiency range | b1, c512 step time | GPU energy/token above idle (b1, c512) |
 | --- | --- | --- | --- | --- | --- | --- |
 | Qwen3-1.7B | bf16 | 22 / 22 | 12,402 / 13,296 | 0.678–0.934 | 19.353 ms | 0.323 J |
 | Qwen3-1.7B | fp8 | 24 / 24 | 24,804 / 24,881 | 0.672–0.869 | 19.510 ms | 0.317 J |
@@ -64,10 +66,34 @@ The grid is Qwen3-1.7B, 4B and 8B (bf16 weights) × KV cache dtype auto (bf16) a
 
 "Points" is measured / feasible according to the planner. Efficiency uses the achievable 265.1 GB/s ceiling and the median step time, as in M2. The bootstrap CIs are in the raw records.
 
-- **Sanity checks pass.** No point beats the ceiling, and none falls below 20% of it. Every record has `has_uncommitted_changes: false`. Each record lists one other GPU process at start, which is the sweep's own vLLM engine subprocess.
-- **The planner's KV-capacity estimate is off in both directions.** It was 18% too high for Qwen3-8B bf16, so 3 points were skipped at runtime: (32, 2048), (8, 8192) and (2, 32768). It was also 2% too high for Qwen3-8B fp8, but no point needed those blocks. For the other four sweeps it was 0.3–7% too low. Allocated capacity also changes from run to run. Qwen3-4B bf16 got 7,934 blocks in repeat 1 and 8,219 in repeat 2.
-- **Differs from M2:** Qwen3-1.7B bf16 at batch 1, context 512 measured 19.353 ms here and 20.433 ms in M2, 5.3% faster. M4 should check whether this is run-to-run variance or the code change between them.
+### All three repeats
 
-### Repeats 2 and 3: running
+Points measured, with KV cache blocks allocated in brackets:
 
-They run one sweep after another from 2026-11-18. The first sweep of repeat 2, Qwen3-1.7B bf16, ran at 06:19 UTC at `40d8afd`. The rest of the queue started at 18:01 UTC. These rows are not committed yet. They are told apart from repeat 1 by `timestamp_utc`.
+| Model | KV dtype | Repeat 1 | Repeat 2 | Repeat 3 | b1, c512 step time (repeats 1 / 2 / 3) |
+| --- | --- | --- | --- | --- | --- |
+| Qwen3-1.7B | bf16 | 22 (13,296) | 22 (12,883) | 22 (13,179) | 19.353 / 20.653 / 19.851 ms |
+| Qwen3-1.7B | fp8 | 24 (24,881) | 24 (25,073) | 24 (26,650) | 19.510 / 19.103 / 19.712 ms |
+| Qwen3-4B | bf16 | 19 (7,934) | 19 (8,219) | **20** (8,273) | 42.040 / 42.450 / 42.715 ms |
+| Qwen3-4B | fp8 | 22 (15,825) | 22 (16,189) | 22 (16,127) | 42.096 / 42.281 / 42.549 ms |
+| Qwen3-8B | bf16 | 16 (3,840) | 16 (3,912) | **18** (4,197) | 69.322 / 68.446 / 68.461 ms |
+| Qwen3-8B | fp8 | 22 (9,202) | **19** (8,147) | **21** (8,357) | 68.960 / 68.127 / 68.205 ms |
+
+**Coverage.** 122 of the 128 planned feasible points have all 3 repeats. The other 6, plus one point the planner did not expect to fit, sit at the edge of what fits: they need just more KV cache blocks than vLLM allocated in some runs, but fewer than in others.
+
+| Point (model, KV dtype, batch, context) | Repeats | Blocks needed |
+| --- | --- | --- |
+| Qwen3-4B bf16, 4, 32768 | 1 (not planned as feasible) | 8,228 |
+| Qwen3-8B bf16, 2, 32768 | 1 | 4,114 |
+| Qwen3-8B bf16, 8, 8192 | 1 | 4,168 |
+| Qwen3-8B bf16, 32, 2048 | **0** (planned, never fit) | 4,384 |
+| Qwen3-8B fp8, 64, 2048 | 1 | 8,768 |
+| Qwen3-8B fp8, 16, 8192 | 2 | 8,336 |
+| Qwen3-8B fp8, 4, 32768 | 2 | 8,228 |
+
+### Notes
+
+- **Sanity checks pass on all 374 records.** Efficiency ranges from 0.641 to 0.934, so no point beats the ceiling and none falls below 20% of it. Every record has `has_uncommitted_changes: false`. Each record lists one other GPU process at start, the sweep's own vLLM engine subprocess. Idle GPU power with the model loaded was 10.3–13.7 W across sweeps.
+- **KV cache capacity is not fixed.** The planner's estimate was 18% too high for Qwen3-8B bf16 and 0.3–7% too low for most other sweeps. vLLM's allocation also varies between runs with identical settings, by up to 13% (Qwen3-8B fp8: 8,147 to 9,202 blocks). That variation is what causes the uneven coverage above.
+- **M2's point is within run-to-run variance.** Qwen3-1.7B bf16 at batch 1, context 512 measured 19.353–20.653 ms over the three repeats, a 6.7% spread, and M2's 20.433 ms falls inside it. The other sweeps vary by 1.1–3.2% at this point. M4 should report the spread across repeats, not only the CI within one.
+- **Commit labels.** The code is identical from `40d8afd` onward. Later records name `dddccd6` (docs only) or `320f285` (results only), whichever was HEAD when that sweep started.
