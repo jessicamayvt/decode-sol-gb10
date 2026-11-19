@@ -3,6 +3,7 @@
 # GPU, runs one sweep under a timeout and checks that nothing is left running.
 #
 # Usage: bash scripts/run_sweep.sh [--timeout 45m] --model <id> --grid <name> [--kv-cache-dtype auto|fp8]
+#            [--points BATCHxCONTEXT ...]
 # Everything except --timeout is passed to `python -m decode_sol.measure`.
 set -euo pipefail
 

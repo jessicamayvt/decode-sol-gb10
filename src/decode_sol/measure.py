@@ -45,17 +45,41 @@ WEIGHT_DTYPE: Final = "bfloat16"
 
 @dataclass(frozen=True, slots=True)
 class SweepConfig:
-    """One process: a model at one KV cache dtype over a named grid."""
+    """One process: a model at one KV cache dtype over a named grid.
+
+    The engine is always sized for the whole grid; points can be a subset of it, to top up
+    points that did not fit in earlier sweeps.
+    """
 
     model: str
     grid_name: str
     kv_cache_dtype: str
     gpu_memory_utilization: float
     output: Path
+    points: tuple[GridPoint, ...]
 
     @property
     def grid(self) -> Grid:
         return GRID_BY_NAME[self.grid_name]
+
+
+def parse_grid_points(point_specs: list[str], grid: Grid) -> tuple[GridPoint, ...]:
+    """Parse BATCHxCONTEXT specs such as 8x8192 into points, in the grid's order."""
+    requested_points: set[GridPoint] = set()
+    for point_spec in point_specs:
+        batch_size_text, separator, context_len_text = point_spec.partition("x")
+        if not separator:
+            raise ValueError(f"expected BATCHxCONTEXT such as 8x8192, got {point_spec!r}")
+        point = GridPoint(batch_size=int(batch_size_text), context_len=int(context_len_text))
+        if point not in grid.points:
+            raise ValueError(f"{point_spec!r} is not a point of the grid")
+        requested_points.add(point)
+
+    points: list[GridPoint] = []
+    for point in grid.points:
+        if point in requested_points:
+            points.append(point)
+    return tuple(points)
 
 
 def make_random_prompts(
@@ -143,6 +167,7 @@ def collect_sweep_metadata(
         "kv_cache_dtype": config.kv_cache_dtype,
         "gpu_memory_utilization": config.gpu_memory_utilization,
         "grid": config.grid_name,
+        "requested_points": [[point.batch_size, point.context_len] for point in config.points],
         "max_model_len": config.grid.max_model_len,
         "max_num_seqs": config.grid.max_batch_size,
         "max_num_batched_tokens": config.grid.max_num_batched_tokens,
@@ -171,13 +196,22 @@ def parse_sweep_config() -> SweepConfig:
     parser.add_argument("--kv-cache-dtype", choices=["auto", "fp8"], default="auto")
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.25)
     parser.add_argument("--output", type=Path, default=Path("results/raw/decode.jsonl"))
+    parser.add_argument(
+        "--points",
+        nargs="+",
+        metavar="BATCHxCONTEXT",
+        help="measure only these grid points (default: the whole grid)",
+    )
     args = parser.parse_args()
+    grid = GRID_BY_NAME[args.grid]
+    points = tuple(grid.points) if args.points is None else parse_grid_points(args.points, grid)
     return SweepConfig(
         model=args.model,
         grid_name=args.grid,
         kv_cache_dtype=args.kv_cache_dtype,
         gpu_memory_utilization=parse_gpu_memory_utilization(args.gpu_memory_utilization),
         output=args.output,
+        points=points,
     )
 
 
@@ -202,7 +236,7 @@ def main() -> None:
     with open_nvml_device() as device:
         # Idle with the model loaded: the baseline every decode window sits on top of.
         idle_window = measure_idle_gpu_energy(device, duration_s=IDLE_DURATION_S)
-        for point in config.grid.points:
+        for point in config.points:
             skip_reason = find_skip_reason(
                 point,
                 num_gpu_blocks=num_gpu_blocks,
