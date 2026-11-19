@@ -50,7 +50,9 @@ Load the matching skill before starting the work, not after.
 | `src/decode_sol/analyze.py` | Pools repeats into `results/summary.csv`: step time, efficiency, GPU energy |
 | `src/decode_sol/gap_model.py` | Linear model of efficiency, fitted to `results/summary.csv` |
 | `src/decode_sol/plots.py` | Every figure |
-| `scripts/` | `setup_env.sh`, `run_sweep.sh` |
+| `src/decode_sol/profile_summary.py` | Top kernels and GPU idle time per decode step, from nsys profiles |
+| `src/decode_sol/profile_decode.py` | Profiles decode steps at one grid point (torch profiler or nsys) |
+| `scripts/` | `setup_env.sh`, `run_sweep.sh`, `run_profile.sh` |
 | `results/raw/` | Append-only measurement records. Never edit or delete them. |
 | `docs/` | Brief, model derivation, setup notes, report draft |
 

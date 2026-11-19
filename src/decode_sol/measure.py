@@ -15,6 +15,7 @@ from typing import Final
 import numpy as np
 from huggingface_hub import HfApi
 from vllm import LLM, SamplingParams
+from vllm.config import ProfilerConfig
 from vllm.inputs import TokensPrompt
 
 from decode_sol.energy import (
@@ -137,8 +138,13 @@ def measure_point(
     return time_paired_generations(llm, prompts, num_pairs=NUM_TIMED_PAIRS, device=device)
 
 
-def load_llm(config: SweepConfig, *, revision: str) -> LLM:
-    """Load the model sized for the grid's largest batch and longest sequence."""
+def load_llm(
+    config: SweepConfig, *, revision: str, profiler_config: ProfilerConfig | None = None
+) -> LLM:
+    """Load the model sized for the grid's largest batch and longest sequence.
+
+    profiler_config is for profile_decode.py; the default leaves vLLM's profiler off.
+    """
     return LLM(
         model=config.model,
         revision=revision,
@@ -150,6 +156,7 @@ def load_llm(config: SweepConfig, *, revision: str) -> LLM:
         max_num_batched_tokens=config.grid.max_num_batched_tokens,
         enable_prefix_caching=False,
         seed=PROMPT_SEED,
+        profiler_config=profiler_config or ProfilerConfig(),
     )
 
 
