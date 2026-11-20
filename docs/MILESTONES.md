@@ -100,11 +100,11 @@ Points measured, with KV cache blocks allocated in brackets:
 
 ## M4: Analysis
 
-**Commits:** `00393c8` (summary table), `e6bffb8` (plots and gap model), `4b86f04` (`--points` option for top-ups), `e306709` (profiling), `83b4b43` (top-up results), `b03c96a` (lint fix), `714fd95` (batch-1 terms in the gap model)
+**Commits:** `00393c8` (summary table), `e6bffb8` (plots and gap model), `4b86f04` (`--points` option for top-ups), `e306709` (profiling), `83b4b43` (top-up results), `b03c96a` (lint fix), `714fd95` (batch-1 terms in the gap model), `6f26e93` (physical gap model)
 
 - `analyze.py` pools the repeats of each grid point into `results/summary.csv`: median step time, efficiency and GPU energy per token, each with a 95% CI from a bootstrap that resamples repeats, then the samples within them.
 - `plots.py` draws `plots/measured_vs_predicted_tokens_per_s.png`, `plots/efficiency_heatmaps.png` and `plots/gpu_energy_per_token_vs_batch.png`.
-- `gap_model.py` fits efficiency to batch size, context length, model size, KV cache dtype and two batch-1 terms (`results/gap_model.json`).
+- `gap_model.py` fits step time as the bytes of each kind of read over that read's own bandwidth, plus fixed time (`results/gap_model.json`). It replaced a linear model of efficiency.
 - `profile_summary.py` reads Nsight Systems profiles and writes the top kernels and GPU idle time per decode step (`results/profile_summary.json`).
 
 ### Coverage after the top-up
@@ -115,18 +115,31 @@ At every topped-up point the old repeat was the slowest, by 2.6–4.5%. The medi
 
 ### Findings
 
-1. **The gap is at batch 1, and it is the matrix-vector kernel.** Efficiency is 0.667–0.849 at batch 1 (24 points) and 0.811–0.929 at batch 2 and above (104 points). At batch 1, cuBLAS `internal::gemvx::kernel` takes 92–97% of GPU busy time and reads the weights at about 183 GB/s (Qwen3-1.7B) and 194 GB/s (Qwen3-4B), 69–73% of the achievable 265.1 GB/s. At batch 2, `cutlass::Kernel2` reads the same Qwen3-4B weights at about 238 GB/s (90%). So a batch 2 step is faster than a batch 1 step: 19.85 → 16.24 ms for Qwen3-1.7B, 42.45 → 34.23 ms for Qwen3-4B, 68.47 → 64.25 ms for Qwen3-8B (bf16 KV cache, context 512). Qwen3-8B reaches 0.84 at batch 1, so the step down shrinks with model size. No Qwen3-8B profile was taken.
-2. **CPU overhead is not the cause.** The GPU idles 0.24–0.33 ms per decode step in all six profiles, 0.4–1.4% of the step. CUDA graphs keep it fed. The profiled step times agree with the measured ones within 1.5%, except Qwen3-4B at batch 2, context 512 (35.58 vs 34.23 ms, 3.9%).
+1. **The gap is at batch 1, and it is the matrix-vector kernel.** Efficiency is 0.667–0.849 at batch 1 (24 points) and 0.811–0.929 at batch 2 and above (104 points). At batch 1, cuBLAS `internal::gemvx::kernel` takes 92–97% of GPU busy time and reads the weights at about 183 GB/s (Qwen3-1.7B) and 194 GB/s (Qwen3-4B), 69–73% of the achievable 265.1 GB/s. At batch 2, `cutlass::Kernel2` reads the same Qwen3-4B weights at about 238 GB/s (90%). So a batch 2 step is faster than a batch 1 step: 19.85 → 16.24 ms for Qwen3-1.7B, 42.45 → 34.23 ms for Qwen3-4B, 68.47 → 64.25 ms for Qwen3-8B (bf16 KV cache, context 512). Qwen3-8B reaches 0.84 at batch 1 because the same kernel reads its larger matrices faster: 225 GB/s (85%), 98% of GPU busy time. The gap model, fitted before that profile was taken, predicted 225.3 GB/s.
+2. **CPU overhead is not the cause.** The GPU idles 0.24–0.33 ms per decode step in all eight profiles, 0.3–1.4% of the step. CUDA graphs keep it fed. The profiled step times agree with the measured ones within 1.5%, except Qwen3-4B bf16 at batch 2, context 512 (35.58 vs 34.23 ms, 3.9%) and Qwen3-4B fp8 at batch 4, context 32768 (73.62 vs 76.38 ms, 3.6%; see finding 4).
 3. **The smallest gaps are at long context, where attention reads most of the bytes.** Qwen3-4B bf16 at batch 2, context 32768 (0.923): `flash::flash_fwd_splitkv_kernel` takes 53% of GPU busy time and reads the KV cache at about 254 GB/s (96%). The matmuls take 46% at about 243 GB/s. The highest efficiency after the top-up is 0.929, Qwen3-4B bf16 at batch 4, context 32768.
-4. **An fp8 KV cache is faster but less efficient.** It reads half the KV bytes, so steps are up to 31% shorter (Qwen3-4B, batch 4, context 32768: 111.3 → 76.4 ms). But efficiency falls (0.929 → 0.876 there), and the gap model puts the cost at 0.019 (95% CI 0.011–0.027). At context 512, attention runs as `kernel_mha` instead of FlashAttention's split-KV kernel. No fp8 profile was taken at long context, where the difference is largest.
+4. **An fp8 KV cache is faster but less efficient.** It reads half the KV bytes, so steps are up to 31% shorter (Qwen3-4B, batch 4, context 32768: 111.3 → 76.4 ms). But efficiency falls (0.929 → 0.876 there), and the gap model fits fp8 attention at 227.7 GB/s against 245.8 GB/s for bf16. With an fp8 KV cache, attention runs FlashInfer's paged kernel (`kernel_mha` in Nsight Systems) instead of FlashAttention's split-KV kernel. In the profile of that point it reads the KV cache at about 245 GB/s, close to bf16's 254 GB/s, so the profiled step implies an efficiency of 0.91. The measured step is 3.6% slower than the profiled one in all three repeats (fastest 76.31 ms), and that is where most of fp8's lower efficiency comes from. The torch profile agrees with Nsight Systems. Both profile the decode steps right after the prefill, while the measurement covers steps 16 to 144. Why the later steps are slower is open.
 5. **Batching cuts GPU energy per token 20–37×, but energy is far noisier than time.** At context 512, from batch 1 to 64, energy above idle falls from 0.443 to 0.022 J for Qwen3-1.7B bf16 (20×) and from 1.853 to 0.062 J for Qwen3-8B bf16 (30×). Including idle power, the drop is 24–37× across the six sweeps. Across repeats of the same point, the median step time varies by 1.6% at the median point (6.7% at most). GPU energy above idle varies by 7% (21% at the 90th percentile, 54% at most). Qwen3-1.7B bf16 at batch 1, context 512: 0.323, 0.444 and 0.469 J above idle, while the step time stayed between 19 and 21 ms.
 
-**Gap model.** R² = 0.868 over 128 points (leave-one-out 0.849), residual std 0.022. Batch 1 costs 0.234 at 1e9 weight parameters (95% CI 0.203–0.273), and that cost shrinks by 0.054 per doubling of model size (0.041–0.069). Beyond batch 1, batch size has no clear effect (−0.005 to +0.002 per doubling). Without the batch-1 terms, R² is 0.341.
+**Gap model.** Step time = weight bytes / matmul bandwidth + KV bytes / attention bandwidth + fixed time + batch size × weight GB × time per sequence per weight GB. Fitted to 128 points by least squares on relative error, it predicts efficiency with R² = 0.958 (leave-one-out 0.952), residual std 0.013. CIs are 95% bootstraps over points.
+
+| Term | Fit (95% CI) | Profiles |
+| --- | --- | --- |
+| Batch-1 matmul bandwidth, Qwen3-1.7B | 186.1 GB/s (182.8–189.0) | about 183 GB/s |
+| Batch-1 matmul bandwidth, Qwen3-4B | 195.4 GB/s (194.2–196.6) | about 194 GB/s |
+| Batch-1 matmul bandwidth, Qwen3-8B | 225.3 GB/s (224.2–226.3) | 225 GB/s |
+| Batch ≥ 2 matmul bandwidth | 244.0 GB/s (242.5–245.7) | about 238–243 GB/s |
+| bf16 attention bandwidth | 245.8 GB/s (242.9–248.5) | about 254 GB/s |
+| fp8 attention bandwidth | 227.7 GB/s (224.8–230.3) | about 245 GB/s (finding 4) |
+| Fixed time | 1.09 ms (0.86–1.31) | GPU idle 0.24–0.33 ms; the rest is small kernels |
+| Time per sequence per weight GB | 0.0043 ms (0.0020–0.0060) | not profiled |
+
+The last term grows with batch size × weights, the shape of the matmul arithmetic, and costs Qwen3-8B 4.2 ms of its 93.7 ms step at batch 64. The profiles don't show yet that it is arithmetic. The linear model of efficiency this replaced had R² = 0.868 with batch-1 terms and 0.341 without.
 
 ### Notes
 
-- **Profiles.** Nsight Systems profiles of 6 points: Qwen3-1.7B bf16 at batch 1, context 512 and 2048; Qwen3-1.7B fp8 at batch 1, context 512; Qwen3-4B bf16 at batch 1 and 2, context 512, and at batch 2, context 32768. The reports are in `profiles/`, which git ignores. Only the summary is committed.
-- **Profiles start at the prefill.** vLLM 0.33 starts profiling at the prefill despite `delay_iterations`, so each profile holds the prefill and fewer decode steps than asked. `profile_summary.py` keeps only decode steps: 18 per profile, 16 at context 32768.
+- **Profiles.** Nsight Systems and torch profiles of 8 points: Qwen3-1.7B bf16 at batch 1, context 512 and 2048; Qwen3-1.7B fp8 at batch 1, context 512; Qwen3-4B bf16 at batch 1 and 2, context 512, and at batch 2, context 32768; Qwen3-4B fp8 at batch 4, context 32768; Qwen3-8B bf16 at batch 1, context 512. The reports are in `profiles/`, which git ignores. Only the summary is committed.
+- **Profiles start at the prefill.** vLLM 0.33 starts profiling at the prefill despite `delay_iterations`, so each profile holds the prefill and fewer decode steps than asked. `profile_summary.py` keeps only decode steps: 18 per profile, 16 and 14 at context 32768, where the prefill takes more of the profiled engine steps.
 - **Kernel time per step comes from the GPU clock.** The LM head and sampling launch after vLLM's NVTX range for the step closes. So a step runs from its first kernel to the next step's first kernel, not to the end of the range.
 - **Commit labels.** The first top-up record names `52e8a33`. That commit was later rewritten as `e306709` to change only its message, and the code is identical. All top-up records have `has_uncommitted_changes: false`.
 - **Sanity checks still pass.** Efficiency is 0.667–0.929, so no point beats the ceiling.
