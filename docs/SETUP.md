@@ -12,7 +12,7 @@ Exact steps that produced a working environment on `blackwell.rlogin` (NVIDIA GB
 | Triton | 3.8.0 |
 | CUDA (torch) | 13.0, arch list `sm_80 … sm_120`; sm_121 runs the sm_120 binaries |
 | Driver | 580.178.04 |
-| Attention backend | `FLASH_ATTN` (chosen by vLLM) |
+| Attention backend | `FLASH_ATTN` (chosen by vLLM); with an fp8 KV cache, attention runs FlashInfer's kernel (see Known warnings) |
 
 ## Steps
 
@@ -87,5 +87,5 @@ vLLM reported 26.67 GiB of KV cache memory (249,712 tokens) under the 0.25 cap.
 
 ## Known warnings (harmless so far)
 
-- `FlashInfer's precompiled kernels are missing` — vLLM picked `FLASH_ATTN`, so FlashInfer is not used.
+- `FlashInfer's precompiled kernels are missing` — with a bf16 KV cache, attention runs FlashAttention's kernels. With an fp8 KV cache, the profiles show FlashInfer's paged attention kernel (`flashinfer::BatchPrefillWithPagedKVCacheKernel`), so FlashInfer is used there despite the warning.
 - `engine core exited unexpectedly; starting cleanup` at shutdown of the offline `LLM` — the process exits cleanly, and no GPU process is left behind.
