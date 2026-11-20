@@ -1,49 +1,64 @@
 {
   "num_points": 128,
-  "r_squared": 0.8682994596594767,
-  "residual_std": 0.022466042500164887,
-  "coefficients": [
+  "r_squared": 0.9583382096135022,
+  "leave_one_out_r_squared": 0.9521079526493281,
+  "efficiency_residual_std": 0.012687016789429078,
+  "estimates": [
     {
-      "feature": "intercept",
-      "estimate": 0.8656655569173489,
-      "ci_low": 0.8469123684308804,
-      "ci_high": 0.8871418760927481
+      "name": "batch_1_matmul_bandwidth[Qwen/Qwen3-1.7B]",
+      "unit": "GB/s",
+      "estimate": 186.10732621862533,
+      "ci_low": 182.8082921870437,
+      "ci_high": 189.03071870824283
     },
     {
-      "feature": "log2_batch_size",
-      "estimate": -0.0015256944952432437,
-      "ci_low": -0.004948435782472935,
-      "ci_high": 0.002028694553151132
+      "name": "batch_1_matmul_bandwidth[Qwen/Qwen3-4B]",
+      "unit": "GB/s",
+      "estimate": 195.38369570519197,
+      "ci_low": 194.18343460123808,
+      "ci_high": 196.55517363770434
     },
     {
-      "feature": "log2_context_len_over_512",
-      "estimate": 0.002305896863425858,
-      "ci_low": 7.1863057789258e-05,
-      "ci_high": 0.004470035844177018
+      "name": "batch_1_matmul_bandwidth[Qwen/Qwen3-8B]",
+      "unit": "GB/s",
+      "estimate": 225.32575490950003,
+      "ci_low": 224.15681518745907,
+      "ci_high": 226.31609999724876
     },
     {
-      "feature": "log2_num_weight_params_over_1e9",
-      "estimate": 0.012180775449824058,
-      "ci_low": 0.007188522613591231,
-      "ci_high": 0.017040650961640938
+      "name": "batch_2_plus_matmul_bandwidth",
+      "unit": "GB/s",
+      "estimate": 243.9849386232294,
+      "ci_low": 242.4716503376637,
+      "ci_high": 245.72023724408183
     },
     {
-      "feature": "is_fp8_kv_cache",
-      "estimate": -0.01877747930070949,
-      "ci_low": -0.02667701140923436,
-      "ci_high": -0.010859353401784998
+      "name": "bf16_attention_bandwidth",
+      "unit": "GB/s",
+      "estimate": 245.79368851206328,
+      "ci_low": 242.87151147233172,
+      "ci_high": 248.54786748677387
     },
     {
-      "feature": "is_batch_1",
-      "estimate": -0.23417762301090705,
-      "ci_low": -0.27293911535880555,
-      "ci_high": -0.20328291221611622
+      "name": "fp8_attention_bandwidth",
+      "unit": "GB/s",
+      "estimate": 227.74246583059823,
+      "ci_low": 224.76660338168872,
+      "ci_high": 230.28873697768773
     },
     {
-      "feature": "is_batch_1_x_log2_num_weight_params_over_1e9",
-      "estimate": 0.05428424202733136,
-      "ci_low": 0.0405445358827649,
-      "ci_high": 0.06858235495686643
+      "name": "fixed_time",
+      "unit": "ms",
+      "estimate": 1.0919893560584588,
+      "ci_low": 0.8644681400277876,
+      "ci_high": 1.3082699686897241
+    },
+    {
+      "name": "time_per_sequence_per_weight_gb",
+      "unit": "ms per sequence per weight GB",
+      "estimate": 0.004331063702484756,
+      "ci_low": 0.0020237547441213613,
+      "ci_high": 0.005985735655712133
     }
   ]
 }

@@ -1,11 +1,25 @@
-"""A linear model of decode efficiency, fitted to the grid points in results/summary.csv."""
+"""A physical model of the gap, fitted to the grid points in results/summary.csv.
+
+The roofline reads every byte at the achievable bandwidth. This model fits decode step time as
+the bytes of each kind of read over that read's own bandwidth, plus time that bytes don't
+explain:
+
+    step time = weight bytes / matmul bandwidth + KV bytes / attention bandwidth
+                + fixed time + batch size * weight GB * time per sequence per weight GB
+
+The profiles (results/profile_summary.json) show why the reads differ. At batch 1 the matmuls
+run as a matrix-vector kernel whose bandwidth depends on the matrix shapes, so each model gets
+its own batch-1 bandwidth; batch >= 2 runs a different kernel, with one bandwidth for all
+models. Attention gets one bandwidth per KV cache dtype. The fixed time covers small kernels,
+launches and GPU idle. The last term grows with the matmul arithmetic, batch size * weights.
+"""
 
 import argparse
 import json
 import logging
-import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Literal, assert_never
 
 import numpy as np
 
@@ -20,22 +34,21 @@ from decode_sol.analyze import (
 
 logger = logging.getLogger(__name__)
 
-GAP_MODEL_REFERENCE_CONTEXT_LEN = 512
-GAP_MODEL_REFERENCE_NUM_WEIGHT_PARAMS = 1e9
-GAP_MODEL_FEATURE_NAMES = (
-    "intercept",
-    "log2_batch_size",
-    "log2_context_len_over_512",
-    "log2_num_weight_params_over_1e9",
-    "is_fp8_kv_cache",
-    "is_batch_1",
-    "is_batch_1_x_log2_num_weight_params_over_1e9",
-)
+TermUnit = Literal["GB/s", "ms", "ms per sequence per weight GB"]
+BYTES_PER_GB = 1e9
+MS_PER_S = 1e3
 
 
 @dataclass(frozen=True, slots=True)
-class GapModelCoefficient:
-    feature: str
+class GapModelTerm:
+    name: str
+    unit: TermUnit
+
+
+@dataclass(frozen=True, slots=True)
+class GapModelEstimate:
+    name: str
+    unit: TermUnit
     estimate: float
     ci_low: float
     ci_high: float
@@ -43,97 +56,183 @@ class GapModelCoefficient:
 
 @dataclass(frozen=True, slots=True)
 class GapModelFit:
-    """Least-squares fit of efficiency on the GAP_MODEL_FEATURE_NAMES, one row per grid point.
+    """Least-squares fit of step time, minimizing relative error, one row per grid point.
 
-    The intercept is the efficiency at context 512, 1e9 weight parameters and bf16 KV cache
-    that the batch >= 2 trend extrapolates to at batch 1. The batch-1 terms add the step to
-    batch 1, where the matmuls run as a matrix-vector kernel (results/profile_summary.json),
-    and how that step changes with model size. CIs are 95% percentile bootstraps over grid
-    points.
+    r_squared is for efficiency, the predicted step time at the achievable bandwidth over the
+    fitted step time, so it compares with a model of efficiency. leave_one_out_r_squared
+    predicts each point from a fit to the others. CIs are 95% percentile bootstraps that
+    resample grid points within each model and batch-1-or-not group, so every term is fitted
+    in every resample.
     """
 
     num_points: int
     r_squared: float
-    residual_std: float
-    coefficients: tuple[GapModelCoefficient, ...]
+    leave_one_out_r_squared: float
+    efficiency_residual_std: float
+    estimates: tuple[GapModelEstimate, ...]
 
 
-def compute_gap_model_features(summary: PointSummary) -> list[float]:
-    """One value per name in GAP_MODEL_FEATURE_NAMES, in that order."""
-    is_batch_1 = summary.batch_size == 1
-    log2_num_weight_params = math.log2(
-        summary.num_weight_params / GAP_MODEL_REFERENCE_NUM_WEIGHT_PARAMS
+def compute_gap_model_terms(models: list[str]) -> list[GapModelTerm]:
+    terms: list[GapModelTerm] = []
+    for model in models:
+        terms.append(GapModelTerm(name=f"batch_1_matmul_bandwidth[{model}]", unit="GB/s"))
+    terms.append(GapModelTerm(name="batch_2_plus_matmul_bandwidth", unit="GB/s"))
+    terms.append(GapModelTerm(name="bf16_attention_bandwidth", unit="GB/s"))
+    terms.append(GapModelTerm(name="fp8_attention_bandwidth", unit="GB/s"))
+    terms.append(GapModelTerm(name="fixed_time", unit="ms"))
+    terms.append(
+        GapModelTerm(name="time_per_sequence_per_weight_gb", unit="ms per sequence per weight GB")
     )
-    return [
-        1.0,
-        math.log2(summary.batch_size),
-        math.log2(summary.context_len / GAP_MODEL_REFERENCE_CONTEXT_LEN),
-        log2_num_weight_params,
-        float(summary.kv_cache_dtype == "fp8"),
-        float(is_batch_1),
-        float(is_batch_1) * log2_num_weight_params,
-    ]
+    return terms
 
 
-def _fit_least_squares(features: np.ndarray, targets: np.ndarray) -> np.ndarray:
-    coefficients, _, _, _ = np.linalg.lstsq(features, targets, rcond=None)
-    return np.asarray(coefficients, dtype=np.float64)  # [num_features]
+def compute_step_time_features(summary: PointSummary, models: list[str]) -> list[float]:
+    """One value per term of compute_gap_model_terms(models), in that order.
+
+    Each coefficient times its feature is seconds: a bandwidth term's coefficient is seconds per
+    byte, so its feature is bytes.
+    """
+    is_batch_1 = summary.batch_size == 1
+    is_fp8 = summary.kv_cache_dtype == "fp8"
+    features: list[float] = []
+    for model in models:
+        is_batch_1_of_model = is_batch_1 and summary.model == model
+        features.append(summary.weight_bytes if is_batch_1_of_model else 0.0)
+    features.append(0.0 if is_batch_1 else summary.weight_bytes)
+    features.append(summary.kv_bytes if not is_fp8 else 0.0)
+    features.append(summary.kv_bytes if is_fp8 else 0.0)
+    features.append(1.0)
+    features.append(summary.batch_size * summary.weight_bytes / BYTES_PER_GB)
+    return features
+
+
+def to_reported_values(coefficients: np.ndarray, unit: TermUnit) -> np.ndarray:
+    match unit:
+        case "GB/s":
+            return 1.0 / coefficients / BYTES_PER_GB
+        case "ms" | "ms per sequence per weight GB":
+            return coefficients * MS_PER_S
+        case _:
+            assert_never(unit)
+
+
+def fit_relative_least_squares(features: np.ndarray, step_times_s: np.ndarray) -> np.ndarray:
+    """Coefficients minimizing the sum of squared (fitted - measured) / measured step time."""
+    relative_features = features / step_times_s[:, None]  # [num_points, num_terms]
+    coefficients, _, _, _ = np.linalg.lstsq(
+        relative_features, np.ones_like(step_times_s), rcond=None
+    )
+    return np.asarray(coefficients, dtype=np.float64)  # [num_terms]
+
+
+def compute_r_squared(efficiencies: np.ndarray, fitted_efficiencies: np.ndarray) -> float:
+    residuals = efficiencies - fitted_efficiencies  # [num_points]
+    total_sum_of_squares = float(np.sum((efficiencies - efficiencies.mean()) ** 2))
+    return 1.0 - float(np.sum(residuals**2)) / total_sum_of_squares
+
+
+def compute_leave_one_out_step_times_s(
+    features: np.ndarray, step_times_s: np.ndarray, coefficients: np.ndarray
+) -> np.ndarray:
+    """Each point's step time as fitted without it, from the hat matrix of the relative fit."""
+    relative_features = features / step_times_s[:, None]  # [num_points, num_terms]
+    hat_matrix = relative_features @ np.linalg.pinv(relative_features)  # [num_points, num_points]
+    hat_diagonal = np.diagonal(hat_matrix)  # [num_points]
+    relative_residuals = 1.0 - relative_features @ coefficients  # [num_points]
+    leave_one_out_relative_residuals = relative_residuals / (1.0 - hat_diagonal)  # [num_points]
+    leave_one_out_step_times_s = step_times_s * (1.0 - leave_one_out_relative_residuals)
+    return np.asarray(leave_one_out_step_times_s, dtype=np.float64)  # [num_points]
+
+
+def compute_stratified_resample_idxs(
+    group_by_point: list[tuple[str, bool]], *, seed: int
+) -> np.ndarray:
+    """Resamples of point indices, each drawn with replacement within its own group."""
+    point_idxs_by_group: dict[tuple[str, bool], list[int]] = {}
+    for point_idx, group in enumerate(group_by_point):
+        point_idxs_by_group.setdefault(group, []).append(point_idx)
+
+    rng = np.random.default_rng(seed)
+    resample_idx_blocks: list[np.ndarray] = []
+    for point_idxs in point_idxs_by_group.values():
+        drawn = rng.integers(
+            0, len(point_idxs), size=(NUM_BOOTSTRAP_RESAMPLES, len(point_idxs))
+        )  # [num_resamples, num_points_in_group]
+        resample_idx_blocks.append(np.asarray(point_idxs)[drawn])
+    return np.concatenate(resample_idx_blocks, axis=1)  # [num_resamples, num_points]
 
 
 def fit_gap_model(summaries: list[PointSummary], *, seed: int) -> GapModelFit:
-    feature_rows = [compute_gap_model_features(summary) for summary in summaries]
-    features = np.asarray(feature_rows)  # [num_points, num_features], fp64
-    efficiencies = np.asarray([summary.efficiency for summary in summaries])  # [num_points]
-    num_points, num_features = features.shape
+    """Raises ValueError if the points can't fit every term, such as a model with no batch 1."""
+    models = sorted({summary.model for summary in summaries})
+    terms = compute_gap_model_terms(models)
+    feature_rows = [compute_step_time_features(summary, models) for summary in summaries]
+    features = np.asarray(feature_rows, dtype=np.float64)  # [num_points, num_terms]
+    if np.linalg.matrix_rank(features) < len(terms):
+        raise ValueError(f"the {len(summaries)} points can't fit all {len(terms)} terms")
+    step_times_s = np.asarray([summary.step_time_ms / MS_PER_S for summary in summaries])
+    predicted_step_times_s = np.asarray(
+        [summary.predicted_step_time_ms / MS_PER_S for summary in summaries]
+    )  # [num_points]
+    efficiencies = predicted_step_times_s / step_times_s  # [num_points]
 
-    estimates = _fit_least_squares(features, efficiencies)  # [num_features]
-    residuals = efficiencies - features @ estimates  # [num_points]
-    total_sum_of_squares = float(np.sum((efficiencies - efficiencies.mean()) ** 2))
-    r_squared = 1.0 - float(np.sum(residuals**2)) / total_sum_of_squares
+    coefficients = fit_relative_least_squares(features, step_times_s)  # [num_terms]
+    fitted_efficiencies = predicted_step_times_s / (features @ coefficients)  # [num_points]
+    leave_one_out_step_times_s = compute_leave_one_out_step_times_s(
+        features, step_times_s, coefficients
+    )  # [num_points]
 
-    rng = np.random.default_rng(seed)
-    resample_idxs = rng.integers(
-        0, num_points, size=(NUM_BOOTSTRAP_RESAMPLES, num_points)
-    )  # [num_resamples, num_points]
-    bootstrap_estimates = np.empty((NUM_BOOTSTRAP_RESAMPLES, num_features))
+    groups = [(summary.model, summary.batch_size == 1) for summary in summaries]
+    resample_idxs = compute_stratified_resample_idxs(groups, seed=seed)
+    bootstrap_coefficients = np.empty((NUM_BOOTSTRAP_RESAMPLES, len(terms)))
     for resample_idx, point_idxs in enumerate(resample_idxs):
-        bootstrap_estimates[resample_idx] = _fit_least_squares(
-            features[point_idxs], efficiencies[point_idxs]
+        bootstrap_coefficients[resample_idx] = fit_relative_least_squares(
+            features[point_idxs], step_times_s[point_idxs]
         )
 
-    coefficients: list[GapModelCoefficient] = []
-    for feature_idx, feature in enumerate(GAP_MODEL_FEATURE_NAMES):
-        feature_estimates = bootstrap_estimates[:, feature_idx]  # [num_resamples]
-        coefficients.append(
-            GapModelCoefficient(
-                feature=feature,
-                estimate=float(estimates[feature_idx]),
-                ci_low=float(np.percentile(feature_estimates, CI_LOW_PERCENTILE)),
-                ci_high=float(np.percentile(feature_estimates, CI_HIGH_PERCENTILE)),
+    estimates: list[GapModelEstimate] = []
+    for term_idx, term in enumerate(terms):
+        bootstrap_values = to_reported_values(
+            bootstrap_coefficients[:, term_idx], term.unit
+        )  # [num_resamples]
+        estimate_value = to_reported_values(coefficients[term_idx : term_idx + 1], term.unit)
+        estimates.append(
+            GapModelEstimate(
+                name=term.name,
+                unit=term.unit,
+                estimate=float(estimate_value[0]),
+                ci_low=float(np.percentile(bootstrap_values, CI_LOW_PERCENTILE)),
+                ci_high=float(np.percentile(bootstrap_values, CI_HIGH_PERCENTILE)),
             )
         )
     return GapModelFit(
-        num_points=num_points,
-        r_squared=r_squared,
-        residual_std=float(np.std(residuals, ddof=num_features)),
-        coefficients=tuple(coefficients),
+        num_points=len(summaries),
+        r_squared=compute_r_squared(efficiencies, fitted_efficiencies),
+        leave_one_out_r_squared=compute_r_squared(
+            efficiencies, predicted_step_times_s / leave_one_out_step_times_s
+        ),
+        efficiency_residual_std=float(np.std(efficiencies - fitted_efficiencies, ddof=len(terms))),
+        estimates=tuple(estimates),
     )
 
 
 def log_gap_model_fit(fit: GapModelFit) -> None:
     logger.info(
-        "Gap model: num_points=%d r_squared=%.3f residual_std=%.4f",
+        "Gap model: num_points=%d r_squared=%.3f leave_one_out_r_squared=%.3f "
+        "efficiency_residual_std=%.4f",
         fit.num_points,
         fit.r_squared,
-        fit.residual_std,
+        fit.leave_one_out_r_squared,
+        fit.efficiency_residual_std,
     )
-    for coefficient in fit.coefficients:
+    for estimate in fit.estimates:
         logger.info(
-            "  %-32s %+.4f (95%% CI %+.4f to %+.4f)",
-            coefficient.feature,
-            coefficient.estimate,
-            coefficient.ci_low,
-            coefficient.ci_high,
+            "  %-45s %8.4g %s (95%% CI %.4g to %.4g)",
+            estimate.name,
+            estimate.estimate,
+            estimate.unit,
+            estimate.ci_low,
+            estimate.ci_high,
         )
 
 

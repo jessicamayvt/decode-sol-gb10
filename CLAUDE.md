@@ -48,7 +48,7 @@ Load the matching skill before starting the work, not after.
 | `src/decode_sol/measure.py` | One model per process, many grid points, raw JSONL out |
 | `src/decode_sol/grid.py` | Sweep definition and feasibility filter |
 | `src/decode_sol/analyze.py` | Pools repeats into `results/summary.csv`: step time, efficiency, GPU energy |
-| `src/decode_sol/gap_model.py` | Linear model of efficiency, fitted to `results/summary.csv` |
+| `src/decode_sol/gap_model.py` | Physical model of step time, one bandwidth per kind of read, fitted to `results/summary.csv` |
 | `src/decode_sol/plots.py` | Every figure |
 | `src/decode_sol/profile_summary.py` | Top kernels and GPU idle time per decode step, from nsys profiles |
 | `src/decode_sol/profile_decode.py` | Profiles decode steps at one grid point (torch profiler or nsys) |
