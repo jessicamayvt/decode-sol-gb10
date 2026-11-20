@@ -7,6 +7,7 @@ range contains the CUDA API call that launched it; for a CUDA graph that is the 
 """
 
 import argparse
+import itertools
 import json
 import logging
 import re
@@ -101,7 +102,7 @@ def split_into_decode_steps(
         step_start_ns.append(min(kernel.start_ns for kernel in launched_in_range))
 
     steps: list[DecodeStep] = []
-    for start_ns, end_ns in zip(step_start_ns, step_start_ns[1:]):
+    for start_ns, end_ns in itertools.pairwise(step_start_ns):
         step_kernels: list[KernelLaunch] = []
         for kernel in kernels:
             if start_ns <= kernel.start_ns < end_ns:
