@@ -28,6 +28,8 @@ GAP_MODEL_FEATURE_NAMES = (
     "log2_context_len_over_512",
     "log2_num_weight_params_over_1e9",
     "is_fp8_kv_cache",
+    "is_batch_1",
+    "is_batch_1_x_log2_num_weight_params_over_1e9",
 )
 
 
@@ -43,8 +45,11 @@ class GapModelCoefficient:
 class GapModelFit:
     """Least-squares fit of efficiency on the GAP_MODEL_FEATURE_NAMES, one row per grid point.
 
-    The intercept is the predicted efficiency at batch 1, context 512, 1e9 weight parameters
-    and bf16 KV cache. CIs are 95% percentile bootstraps over grid points.
+    The intercept is the efficiency at context 512, 1e9 weight parameters and bf16 KV cache
+    that the batch >= 2 trend extrapolates to at batch 1. The batch-1 terms add the step to
+    batch 1, where the matmuls run as a matrix-vector kernel (results/profile_summary.json),
+    and how that step changes with model size. CIs are 95% percentile bootstraps over grid
+    points.
     """
 
     num_points: int
@@ -55,12 +60,18 @@ class GapModelFit:
 
 def compute_gap_model_features(summary: PointSummary) -> list[float]:
     """One value per name in GAP_MODEL_FEATURE_NAMES, in that order."""
+    is_batch_1 = summary.batch_size == 1
+    log2_num_weight_params = math.log2(
+        summary.num_weight_params / GAP_MODEL_REFERENCE_NUM_WEIGHT_PARAMS
+    )
     return [
         1.0,
         math.log2(summary.batch_size),
         math.log2(summary.context_len / GAP_MODEL_REFERENCE_CONTEXT_LEN),
-        math.log2(summary.num_weight_params / GAP_MODEL_REFERENCE_NUM_WEIGHT_PARAMS),
+        log2_num_weight_params,
         float(summary.kv_cache_dtype == "fp8"),
+        float(is_batch_1),
+        float(is_batch_1) * log2_num_weight_params,
     ]
 
 

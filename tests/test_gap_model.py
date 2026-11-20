@@ -33,7 +33,7 @@ def make_summary(
 
 
 def test_gap_model_recovers_the_coefficients_of_an_exactly_linear_efficiency() -> None:
-    true_estimates = [0.6, 0.05, -0.02, 0.03, 0.01]
+    true_estimates = [0.6, 0.05, -0.02, 0.03, 0.01, -0.2, 0.04]
     summaries: list[PointSummary] = []
     for batch_size, context_len, num_weight_params, kv_cache_dtype in itertools.product(
         [1, 2, 4, 8],
@@ -47,6 +47,8 @@ def test_gap_model_recovers_the_coefficients_of_an_exactly_linear_efficiency() -
             - 0.02 * math.log2(context_len / 512)
             + 0.03 * math.log2(num_weight_params / 1e9)
             + 0.01 * (kv_cache_dtype == "fp8")
+            - 0.2 * (batch_size == 1)
+            + 0.04 * (batch_size == 1) * math.log2(num_weight_params / 1e9)
         )
         summaries.append(
             make_summary(
