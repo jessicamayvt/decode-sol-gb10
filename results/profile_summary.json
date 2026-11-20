@@ -67,7 +67,17 @@
         "gpu_time_ms_per_step": 0.011891555555555555,
         "fraction_of_gpu_busy_time": 0.0005840667056743011
       }
-    ]
+    ],
+    "weight_read": {
+      "num_bytes_per_step": 3441149952,
+      "gpu_time_ms_per_step": 18.823139555555557,
+      "bandwidth_gb_per_s": 182.81487749924065
+    },
+    "kv_cache_read": {
+      "num_bytes_per_step": 234881024,
+      "gpu_time_ms_per_step": 1.1048373333333332,
+      "bandwidth_gb_per_s": 212.59330845687091
+    }
   },
   {
     "profile": "Qwen3-1.7B_auto_b1_c512",
@@ -137,7 +147,17 @@
         "gpu_time_ms_per_step": 0.011724444444444445,
         "fraction_of_gpu_busy_time": 0.0005978259440868216
       }
-    ]
+    ],
+    "weight_read": {
+      "num_bytes_per_step": 3441149952,
+      "gpu_time_ms_per_step": 18.84507911111111,
+      "bandwidth_gb_per_s": 182.6020433085414
+    },
+    "kv_cache_read": {
+      "num_bytes_per_step": 58720256,
+      "gpu_time_ms_per_step": 0.3523733333333333,
+      "bandwidth_gb_per_s": 166.642167398214
+    }
   },
   {
     "profile": "Qwen3-1.7B_fp8_b1_c512",
@@ -207,7 +227,17 @@
         "gpu_time_ms_per_step": 0.004787555555555555,
         "fraction_of_gpu_busy_time": 0.0002503949089405859
       }
-    ]
+    ],
+    "weight_read": {
+      "num_bytes_per_step": 3441149952,
+      "gpu_time_ms_per_step": 18.491505777777775,
+      "bandwidth_gb_per_s": 186.09354983602324
+    },
+    "kv_cache_read": {
+      "num_bytes_per_step": 29360128,
+      "gpu_time_ms_per_step": 0.30876444444444445,
+      "bandwidth_gb_per_s": 95.08908337171809
+    }
   },
   {
     "profile": "Qwen3-4B_auto_b1_c512",
@@ -277,7 +307,17 @@
         "gpu_time_ms_per_step": 0.01296,
         "fraction_of_gpu_busy_time": 0.00030434871733297673
       }
-    ]
+    ],
+    "weight_read": {
+      "num_bytes_per_step": 8044936192,
+      "gpu_time_ms_per_step": 41.52267911111111,
+      "bandwidth_gb_per_s": 193.74800384321165
+    },
+    "kv_cache_read": {
+      "num_bytes_per_step": 75497472,
+      "gpu_time_ms_per_step": 0.4877831111111111,
+      "bandwidth_gb_per_s": 154.77672408137678
+    }
   },
   {
     "profile": "Qwen3-4B_auto_b2_c32768",
@@ -347,7 +387,17 @@
         "gpu_time_ms_per_step": 0.039194,
         "fraction_of_gpu_busy_time": 0.0005439680186665109
       }
-    ]
+    ],
+    "weight_read": {
+      "num_bytes_per_step": 8044936192,
+      "gpu_time_ms_per_step": 33.043654,
+      "bandwidth_gb_per_s": 243.46387938815727
+    },
+    "kv_cache_read": {
+      "num_bytes_per_step": 9663676416,
+      "gpu_time_ms_per_step": 38.18374,
+      "bandwidth_gb_per_s": 253.08354854710407
+    }
   },
   {
     "profile": "Qwen3-4B_auto_b2_c512",
@@ -417,7 +467,17 @@
         "gpu_time_ms_per_step": 0.03818488888888889,
         "fraction_of_gpu_busy_time": 0.0010773125077993433
       }
-    ]
+    ],
+    "weight_read": {
+      "num_bytes_per_step": 8044936192,
+      "gpu_time_ms_per_step": 33.87547911111111,
+      "bandwidth_gb_per_s": 237.48553239978446
+    },
+    "kv_cache_read": {
+      "num_bytes_per_step": 150994944,
+      "gpu_time_ms_per_step": 0.8261404444444445,
+      "bandwidth_gb_per_s": 182.77151907450764
+    }
   },
   {
     "profile": "Qwen3-4B_fp8_b4_c32768",
@@ -487,7 +547,257 @@
         "gpu_time_ms_per_step": 0.008550857142857143,
         "fraction_of_gpu_busy_time": 0.00011598933257797128
       }
-    ]
+    ],
+    "weight_read": {
+      "num_bytes_per_step": 8044936192,
+      "gpu_time_ms_per_step": 33.680434285714284,
+      "bandwidth_gb_per_s": 238.86082120420573
+    },
+    "kv_cache_read": {
+      "num_bytes_per_step": 9663676416,
+      "gpu_time_ms_per_step": 39.52978971428572,
+      "bandwidth_gb_per_s": 244.4656671803046
+    }
+  },
+  {
+    "profile": "Qwen3-4B_fp8_b4_c32768_blackwell1",
+    "num_decode_steps": 14,
+    "gpu_step_time_ms": 73.43534399999999,
+    "gpu_busy_ms": 73.20300800000001,
+    "gpu_idle_ms": 0.23283199999999998,
+    "cpu_step_range_ms": 2.51648,
+    "top_kernels": [
+      {
+        "name": "kernel_mha",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 39.539424,
+        "fraction_of_gpu_busy_time": 0.5378461068158108
+      },
+      {
+        "name": "cutlass::Kernel2",
+        "num_launches_per_step": 145.0,
+        "gpu_time_ms_per_step": 33.47697142857143,
+        "fraction_of_gpu_busy_time": 0.4553798950344161
+      },
+      {
+        "name": "vllm::reshape_and_cache_flash_kernel",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 0.15750857142857141,
+        "fraction_of_gpu_busy_time": 0.0021425545281837485
+      },
+      {
+        "name": "triton_red_fused_fused_add_rms_norm_2",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 0.06450742857142858,
+        "fraction_of_gpu_busy_time": 0.0008774803931853397
+      },
+      {
+        "name": "triton_per_fused_add_cat_index_select_mul_rms_norm_split_split_with_sizes_sub_unsqueeze_view_4",
+        "num_launches_per_step": 35.0,
+        "gpu_time_ms_per_step": 0.06016457142857143,
+        "fraction_of_gpu_busy_time": 0.0008184054606131568
+      },
+      {
+        "name": "triton_red_fused_fused_add_rms_norm_0",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 0.05886857142857143,
+        "fraction_of_gpu_busy_time": 0.0008007762570508264
+      },
+      {
+        "name": "triton_per_fused_add_cat_index_select_mul_rms_norm_split_split_with_sizes_sub_unsqueeze_view_3",
+        "num_launches_per_step": 35.0,
+        "gpu_time_ms_per_step": 0.05877942857142857,
+        "fraction_of_gpu_busy_time": 0.0007995636663296079
+      },
+      {
+        "name": "triton_poi_fused_mul_silu_slice_1",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 0.04648457142857143,
+        "fraction_of_gpu_busy_time": 0.0006323194230107807
+      },
+      {
+        "name": "_gumbel_sample_kernel",
+        "num_launches_per_step": 1.0,
+        "gpu_time_ms_per_step": 0.006946285714285715,
+        "fraction_of_gpu_busy_time": 9.448880004571778e-05
+      },
+      {
+        "name": "_compute_slot_mappings_kernel",
+        "num_launches_per_step": 1.0,
+        "gpu_time_ms_per_step": 0.005588571428571429,
+        "fraction_of_gpu_busy_time": 7.602011059946692e-05
+      }
+    ],
+    "weight_read": {
+      "num_bytes_per_step": 8044936192,
+      "gpu_time_ms_per_step": 33.47697142857143,
+      "bandwidth_gb_per_s": 240.31254467463347
+    },
+    "kv_cache_read": {
+      "num_bytes_per_step": 9663676416,
+      "gpu_time_ms_per_step": 39.539424,
+      "bandwidth_gb_per_s": 244.40609999781483
+    }
+  },
+  {
+    "profile": "Qwen3-4B_fp8_b4_c32768_blackwell2",
+    "num_decode_steps": 14,
+    "gpu_step_time_ms": 73.63742400000001,
+    "gpu_busy_ms": 73.40174400000001,
+    "gpu_idle_ms": 0.23403200000000002,
+    "cpu_step_range_ms": 2.440144,
+    "top_kernels": [
+      {
+        "name": "kernel_mha",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 39.462132571428576,
+        "fraction_of_gpu_busy_time": 0.5356882100229244
+      },
+      {
+        "name": "cutlass::Kernel2",
+        "num_launches_per_step": 145.0,
+        "gpu_time_ms_per_step": 33.701654857142856,
+        "fraction_of_gpu_busy_time": 0.4574912197802617
+      },
+      {
+        "name": "vllm::reshape_and_cache_flash_kernel",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 0.154912,
+        "fraction_of_gpu_busy_time": 0.0021028902034340093
+      },
+      {
+        "name": "triton_red_fused_fused_add_rms_norm_2",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 0.06418057142857143,
+        "fraction_of_gpu_busy_time": 0.0008712346035680871
+      },
+      {
+        "name": "triton_red_fused_fused_add_rms_norm_0",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 0.06037257142857143,
+        "fraction_of_gpu_busy_time": 0.0008195419916679329
+      },
+      {
+        "name": "triton_per_fused_add_cat_index_select_mul_rms_norm_split_split_with_sizes_sub_unsqueeze_view_4",
+        "num_launches_per_step": 35.0,
+        "gpu_time_ms_per_step": 0.060297142857142855,
+        "fraction_of_gpu_busy_time": 0.0008185180683829958
+      },
+      {
+        "name": "triton_per_fused_add_cat_index_select_mul_rms_norm_split_split_with_sizes_sub_unsqueeze_view_3",
+        "num_launches_per_step": 35.0,
+        "gpu_time_ms_per_step": 0.059046857142857144,
+        "fraction_of_gpu_busy_time": 0.0008015457642357063
+      },
+      {
+        "name": "triton_poi_fused_mul_silu_slice_1",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 0.04679771428571428,
+        "fraction_of_gpu_busy_time": 0.0006352668283575988
+      },
+      {
+        "name": "_gumbel_sample_kernel",
+        "num_launches_per_step": 1.0,
+        "gpu_time_ms_per_step": 0.008098285714285714,
+        "fraction_of_gpu_busy_time": 0.00010993212722823935
+      },
+      {
+        "name": "_gather_block_tables_kernel",
+        "num_launches_per_step": 1.0,
+        "gpu_time_ms_per_step": 0.0071314285714285715,
+        "fraction_of_gpu_busy_time": 9.680729239404651e-05
+      }
+    ],
+    "weight_read": {
+      "num_bytes_per_step": 8044936192,
+      "gpu_time_ms_per_step": 33.701654857142856,
+      "bandwidth_gb_per_s": 238.71042018860763
+    },
+    "kv_cache_read": {
+      "num_bytes_per_step": 9663676416,
+      "gpu_time_ms_per_step": 39.462132571428576,
+      "bandwidth_gb_per_s": 244.88479933283452
+    }
+  },
+  {
+    "profile": "Qwen3-4B_fp8_b4_c32768_kepler",
+    "num_decode_steps": 14,
+    "gpu_step_time_ms": 75.10145600000001,
+    "gpu_busy_ms": 74.86929599999999,
+    "gpu_idle_ms": 0.236064,
+    "cpu_step_range_ms": 2.8364,
+    "top_kernels": [
+      {
+        "name": "kernel_mha",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 41.261483428571424,
+        "fraction_of_gpu_busy_time": 0.5501615125613042
+      },
+      {
+        "name": "cutlass::Kernel2",
+        "num_launches_per_step": 145.0,
+        "gpu_time_ms_per_step": 33.225088,
+        "fraction_of_gpu_busy_time": 0.44300793743166944
+      },
+      {
+        "name": "vllm::reshape_and_cache_flash_kernel",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 0.16175085714285714,
+        "fraction_of_gpu_busy_time": 0.002156711025134433
+      },
+      {
+        "name": "triton_red_fused_fused_add_rms_norm_2",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 0.06373028571428571,
+        "fraction_of_gpu_busy_time": 0.0008497501173275057
+      },
+      {
+        "name": "triton_per_fused_add_cat_index_select_mul_rms_norm_split_split_with_sizes_sub_unsqueeze_view_3",
+        "num_launches_per_step": 35.0,
+        "gpu_time_ms_per_step": 0.06237942857142857,
+        "fraction_of_gpu_busy_time": 0.0008317384137430944
+      },
+      {
+        "name": "triton_red_fused_fused_add_rms_norm_0",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 0.06200228571428572,
+        "fraction_of_gpu_busy_time": 0.0008267097655342486
+      },
+      {
+        "name": "triton_per_fused_add_cat_index_select_mul_rms_norm_split_split_with_sizes_sub_unsqueeze_view_4",
+        "num_launches_per_step": 35.0,
+        "gpu_time_ms_per_step": 0.06199542857142857,
+        "fraction_of_gpu_busy_time": 0.0008266183355668151
+      },
+      {
+        "name": "triton_poi_fused_mul_silu_slice_1",
+        "num_launches_per_step": 36.0,
+        "gpu_time_ms_per_step": 0.04662628571428572,
+        "fraction_of_gpu_busy_time": 0.0006216933018923962
+      },
+      {
+        "name": "_gumbel_sample_kernel",
+        "num_launches_per_step": 1.0,
+        "gpu_time_ms_per_step": 0.008121142857142856,
+        "fraction_of_gpu_busy_time": 0.00010828355809714611
+      },
+      {
+        "name": "at::native::index_elementwise_kernel",
+        "num_launches_per_step": 2.0,
+        "gpu_time_ms_per_step": 0.006009142857142857,
+        "fraction_of_gpu_busy_time": 8.012312812760966e-05
+      }
+    ],
+    "weight_read": {
+      "num_bytes_per_step": 8044936192,
+      "gpu_time_ms_per_step": 33.225088,
+      "bandwidth_gb_per_s": 242.13438327085845
+    },
+    "kv_cache_read": {
+      "num_bytes_per_step": 9663676416,
+      "gpu_time_ms_per_step": 41.261483428571424,
+      "bandwidth_gb_per_s": 234.2057437835211
+    }
   },
   {
     "profile": "Qwen3-8B_auto_b1_c512",
@@ -557,6 +867,16 @@
         "gpu_time_ms_per_step": 0.013265777777777777,
         "fraction_of_gpu_busy_time": 0.00019412371237275915
       }
-    ]
+    ],
+    "weight_read": {
+      "num_bytes_per_step": 15136811008,
+      "gpu_time_ms_per_step": 67.26351644444445,
+      "bandwidth_gb_per_s": 225.0374617345806
+    },
+    "kv_cache_read": {
+      "num_bytes_per_step": 75497472,
+      "gpu_time_ms_per_step": 0.48758755555555555,
+      "bandwidth_gb_per_s": 154.83880000583372
+    }
   }
 ]
