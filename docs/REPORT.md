@@ -7,7 +7,7 @@
 During decode, each step reads every weight and the whole KV cache from memory, so a memory-bound GPU has a hard floor on step time: bytes read over bandwidth. This project asks four questions about vLLM on an NVIDIA GB10:
 
 1. **What fraction of that ceiling does vLLM reach?** 67–93% of the achievable bandwidth across 128 configurations of Qwen3 1.7B–8B, batch 1–64, context 512–32768 and bf16 or fp8 KV cache.
-2. **Where does the rest go?** Mostly into matmul and attention kernels that read memory slower than a plain read does. At batch 1, cuBLAS's matrix-vector kernel reads the weights at 70–85% of the achievable bandwidth, and it takes 92–98% of the GPU's time. CPU overhead is small: the GPU idles 0.24–0.33 ms per step.
+2. **Where does the rest go?** Mostly into matmul and attention kernels that read memory slower than a plain read does. At batch 1, cuBLAS's matrix-vector kernel reads the weights at 69–85% of the achievable bandwidth, and it takes 92–98% of the GPU's time. CPU overhead is small: the GPU idles 0.24–0.33 ms per step.
 3. **How does GPU energy per token change?** Batching from 1 to 64 cuts it 20–30× above idle (24–37× including idle) at context 512. It is far noisier between runs than step time.
 4. **Can a small model predict efficiency?** A physical model with one bandwidth per kind of read predicts it with R² = 0.958 (0.952 leaving each point out), and its fitted bandwidths match the profiles.
 
@@ -63,7 +63,7 @@ The model leaves out activations and logits, compute, host overhead and imperfec
 - **The batch-1 gap shrinks with model size**: median batch-1 efficiency is 0.683 for Qwen3-1.7B, 0.723 for 4B and 0.839 for 8B.
 - **Long context helps**, because attention reads the KV cache closer to the ceiling than the matmuls read the weights. Qwen3-1.7B at batch 1 goes from 0.667 at context 512 to 0.761 at 32768. The best point is Qwen3-4B bf16 at batch 4, context 32768: 0.929.
 - **Efficiency dips at batch 32–64**, for example to 0.83 for Qwen3-8B bf16 at batch 64, context 512.
-- **An fp8 KV cache is faster but less efficient.** It halves the KV bytes, so steps are up to 31% shorter (Qwen3-4B at batch 4, context 32768: 111.3 → 76.4 ms), but efficiency there falls from 0.929 to 0.876.
+- **An fp8 KV cache is faster but less efficient.** It halves the KV bytes, so steps are up to 37% shorter (Qwen3-1.7B at batch 64, context 2048: 79.8 → 50.3 ms). But efficiency falls: at Qwen3-4B, batch 4, context 32768, the step drops from 111.3 to 76.4 ms (31%) and efficiency from 0.929 to 0.876.
 
 ### GPU energy per token
 
@@ -74,18 +74,18 @@ At context 512 with a bf16 KV cache:
 | Model | Batch 1, above idle | Batch 64, above idle | Ratio | Batch 1 → 64, including idle |
 | --- | --- | --- | --- | --- |
 | Qwen3-1.7B | 0.443 J (95% CI 0.323–0.467) | 0.0222 J (0.0214–0.0227) | 20× | 0.666 → 0.0281 J |
-| Qwen3-4B | 1.056 J (1.004–1.089) | 0.0463 J (0.0449–0.0485) | 23× | 1.551 → 0.0572 J |
+| Qwen3-4B | 1.056 J (1.004–1.089) | 0.0463 J (0.0449–0.0485) | 23× | 1.550 → 0.0572 J |
 | Qwen3-8B | 1.853 J (1.778–1.896) | 0.0618 J (0.0603–0.0626) | 30× | 2.632 → 0.0784 J |
 
 Over all six sweeps, the drop from batch 1 to 64 is 20–32× above idle and 24–37× including idle. Decode at batch 1 is mostly the GPU waiting on memory, so the energy is spread over few tokens; batching amortizes the same weight reads over 64.
 
-**GPU energy is much noisier than time.** Across the 3 repeats of a point, the median step time varies by 1.6% (6.7% at most), but GPU energy above idle varies by 7% (21% at the 90th percentile, 54% at most). At Qwen3-1.7B, batch 1, context 512, the three repeats read 0.323, 0.444 and 0.469 J above idle while the step time stayed within 19–21 ms. That is why the CI in the first row above is wide. Energy claims need repeats at different times, not just more iterations in one run.
+**GPU energy is much noisier than time.** Across the 3 repeats of a point, the median step time varies by 1.6% (6.5% at most), but GPU energy above idle varies by 7% (21% at the 90th percentile, 54% at most). At Qwen3-1.7B, batch 1, context 512, the three repeats read 0.323, 0.444 and 0.469 J above idle while the step time stayed within 19–21 ms. That is why the CI in the first row above is wide. Energy claims need repeats at different times, not just more iterations in one run.
 
 ## The gap
 
 ### Profiles
 
-Eight points were profiled with Nsight Systems and vLLM's torch profiler: the three biggest gaps (all Qwen3-1.7B at batch 1), the smallest at the time of profiling (Qwen3-4B bf16 at batch 2, context 32768), and four that test specific findings. `profile_summary.py` splits each trace into decode steps on the GPU clock and sums kernel time per step (`results/profile_summary.json`).
+Eight points were profiled with Nsight Systems and vLLM's torch profiler: the three biggest gaps (all Qwen3-1.7B at batch 1), the smallest at the time of profiling (Qwen3-4B bf16 at batch 2, context 32768), and four that test specific findings. They ran on two of the department's GB10 machines: Qwen3-1.7B bf16 at batch 1, context 512 and Qwen3-4B bf16 at batch 1 and 2, context 512 on pascal, the rest on blackwell. `profile_summary.py` splits each trace into decode steps on the GPU clock, sums kernel time per step, and divides the bytes each step must read by the time of the kernels that read them (`results/profile_summary.json`).
 
 | Point | Efficiency | Top kernel (share of GPU busy time) | Bandwidth it reaches | GPU idle per step |
 | --- | --- | --- | --- | --- |
@@ -95,7 +95,7 @@ Eight points were profiled with Nsight Systems and vLLM's torch profiler: the th
 | Qwen3-4B bf16, b1, c512 | 0.723 | cuBLAS `gemvx` (98%) | about 194 GB/s on weights | 0.33 ms |
 | Qwen3-8B bf16, b1, c512 | 0.839 | cuBLAS `gemvx` (98%) | 225 GB/s on weights | 0.33 ms |
 | Qwen3-4B bf16, b2, c512 | 0.906 | CUTLASS GEMM (96%) | about 238 GB/s on weights | 0.29 ms |
-| Qwen3-4B bf16, b2, c32768 | 0.923 | FlashAttention split-KV (53%), CUTLASS GEMM (46%) | about 254 GB/s on KV, 243 GB/s on weights | 0.30 ms |
+| Qwen3-4B bf16, b2, c32768 | 0.923 | FlashAttention split-KV (53%), CUTLASS GEMM (46%) | about 253 GB/s on KV, 243 GB/s on weights | 0.30 ms |
 | Qwen3-4B fp8, b4, c32768 | 0.876 | FlashInfer paged attention (54%), CUTLASS GEMM (46%) | about 245 GB/s on KV, 239 GB/s on weights | 0.24 ms |
 
 "Bandwidth it reaches" is the bytes that kernel must read over its GPU time.
@@ -104,7 +104,14 @@ Eight points were profiled with Nsight Systems and vLLM's torch profiler: the th
 
 **The CPU is not the bottleneck.** With CUDA graphs, the GPU idles only 0.24–0.33 ms per step, 0.3–1.4% of the step, in all eight profiles. Profiled step times agree with the measured ones within 1.5% at six of the eight points.
 
-**fp8 attention looks fine in the profile.** With an fp8 KV cache, vLLM runs attention through FlashInfer's paged kernel instead of FlashAttention's split-KV kernel. In the profile it reads the KV cache at about 245 GB/s, close to FlashAttention's 254 GB/s on bf16, so the profiled step implies an efficiency of 0.91. But the measured step is 3.6% slower than the profiled one (76.38 vs 73.62 ms), in all three repeats, and that is where most of fp8's lower efficiency comes from. Both profilers capture the decode steps right after the prefill, while the measurement covers steps 16 to 144. **Why the later steps are slower is an open question.**
+**Most of the fp8 gap is a slowdown over long runs, not the attention kernel.** With an fp8 KV cache, vLLM runs attention through FlashInfer's paged kernel instead of FlashAttention's split-KV kernel. Profiled on blackwell at Qwen3-4B, batch 4, context 32768, it reads the KV cache at about 245 GB/s, close to FlashAttention's 253 GB/s on bf16, and the profiled step (73.62 ms) implies an efficiency of 0.91. The sweep measured 76.38 ms, 3.7% slower. Follow-up runs at that point split the gap (`results/raw/fp8_gap_check.jsonl` and the `_blackwell1`, `_blackwell2` and `_kepler` profiles in `results/profile_summary.json`):
+
+- **In a fresh process, measurement and profile agree.** On blackwell, a fresh measurement gives 74.09 ms and two new profiles 73.44 and 73.64 ms, so the first profile reproduces. On kepler, a fresh measurement gives 75.47 ms and a profile 75.10 ms.
+- **Machines differ.** Kepler is about 2% slower than blackwell, all of it in FlashInfer's attention kernel: it reads the KV cache at 234 GB/s against 244–245 GB/s on blackwell. Its matmuls are as fast.
+- **Long runs get slower.** This point is the last of its sweep, about 69 minutes into the process. On blackwell it measures 74.09 ms fresh and 76.34 ms at the end of a sweep (3.0%). On kepler, measuring it over and over for 69 minutes raised it steadily from 75.27 to 75.94 ms (0.9%). M4's top-up points the same way: at every point measured again in a fresh process, the sweep's repeat was the slowest, by 2.6–4.5%, though on a different machine.
+- **Not heat, clocks or KV block placement.** Through all these runs the GPU reached at most 72 °C and held about 2400 MHz, with no throttling reported. Running one generation at every earlier grid point first, to scatter the KV cache blocks the way a sweep does, gave 75.17 ms, the same as fresh.
+
+**Why long runs get slower is an open question.** The sweep runs the grid context by context, so the points measured late are the long-context ones, and their measured efficiency is probably low by up to a few percent.
 
 ### The gap model
 
@@ -125,8 +132,8 @@ It is fitted to all 128 points by least squares on relative error (`gap_model.py
 | Batch-1 matmul bandwidth, Qwen3-4B | 195.4 GB/s (194.2–196.6) | about 194 GB/s |
 | Batch-1 matmul bandwidth, Qwen3-8B | 225.3 GB/s (224.2–226.3) | 225 GB/s, profiled after the fit |
 | Batch ≥ 2 matmul bandwidth | 244.0 GB/s (242.5–245.7) | about 238–243 GB/s |
-| bf16 attention bandwidth | 245.8 GB/s (242.9–248.5) | about 254 GB/s |
-| fp8 attention bandwidth | 227.7 GB/s (224.8–230.3) | about 245 GB/s, plus the unexplained 3.6% |
+| bf16 attention bandwidth | 245.8 GB/s (242.9–248.5) | about 253 GB/s |
+| fp8 attention bandwidth | 227.7 GB/s (224.8–230.3) | 234–245 GB/s depending on the machine; the fit also absorbs the long-run slowdown |
 | Fixed time per step | 1.09 ms (0.86–1.31) | GPU idle 0.24–0.33 ms; the rest is small kernels (norms, activations, sampling) |
 | Time per sequence per weight GB | 0.0043 ms (0.0020–0.0060) | not profiled |
 
@@ -134,13 +141,13 @@ It is fitted to all 128 points by least squares on relative error (`gap_model.py
 
 The last term grows with batch × weights, which is the shape of the matmul arithmetic. It is what makes efficiency dip at batch 64: 4.2 ms of Qwen3-8B's 93.7 ms step at batch 64, context 512. The profiles don't yet show that it is arithmetic.
 
-For comparison, the brief's starting point, a linear regression of efficiency on log2 batch, log2 context, log2 model size and KV dtype, reaches R² = 0.341. Adding a batch-1 indicator and its interaction with model size gives 0.868. The physical model does better with 8 parameters, each of which is a bandwidth or a time that a profiler can check.
+For comparison, the brief's starting point, a linear regression of efficiency on log2 batch, log2 context, log2 model size and KV dtype, reached R² = 0.327 when fitted before the top-up (`results/gap_model.json` at commit `e6bffb8`). Adding a batch-1 indicator and its interaction with model size gave 0.868 (the same file at `714fd95`). The physical model does better with 8 parameters, each of which is a bandwidth or a time that a profiler can check.
 
 ## What would change on datacenter GPUs
 
 These are expectations from the mechanism above, not measurements.
 
-- **Fixed costs weigh more.** An H100 SXM has 3.35 TB/s of HBM3 (spec), about 12× the GB10. Qwen3-8B's batch-1 ceiling drops from 57 ms to about 4.5 ms per step, but the parts that don't scale with bandwidth stay: the 0.24–0.33 ms of GPU idle and the launch cost of the 1 ms of fixed time. Together they would be up to a quarter of a step instead of 2%, so CPU overhead and CUDA graph coverage matter far more there.
+- **Fixed costs weigh more.** An H100 SXM has 3.35 TB/s of HBM3 (spec), about 12× the GB10. Qwen3-8B's batch-1 ceiling drops from 57 ms to about 4.7 ms per step, but the parts that don't scale with bandwidth stay: the 0.24–0.33 ms of GPU idle and the launch cost of the 1 ms of fixed time. Together they would be up to a quarter of a step instead of 2%, so CPU overhead and CUDA graph coverage matter far more there.
 - **Kernel bandwidths are not portable.** The 69–85% batch-1 figure is cuBLAS's `gemvx` on sm_121. Datacenter GPUs get different kernels and better-tuned libraries, and the gap model's bandwidths would need refitting on each GPU. The method carries over: fit one bandwidth per kind of read and check it against a profile.
 - **The batch where compute shows up moves** with each GPU's ratio of FLOP/s to bytes/s. This grid stayed memory-bound up to batch 64, apart from the small per-sequence term; a GPU with a different ratio would show that term at a different batch.
 - **Energy would include memory.** NVML on datacenter boards reports power for the whole board, HBM included. On the GB10 it covers the GPU only, so these J/token figures leave out the energy of the very memory reads that dominate decode. Numbers from the two are not comparable.
@@ -155,4 +162,4 @@ These are expectations from the mechanism above, not measurements.
 5. **Analysis.** `python -m decode_sol.analyze` writes `results/summary.csv`, `python -m decode_sol.plots` the figures in `plots/`, and `python -m decode_sol.gap_model` writes `results/gap_model.json`.
 6. **Profiles.** `bash scripts/run_profile.sh --nsys --model <model> --batch-size <n> --context-len <n> [--kv-cache-dtype fp8]` for Nsight Systems, the same without `--nsys` for the torch profiler. Then `python -m decode_sol.profile_summary` writes `results/profile_summary.json`.
 
-The full grid took about 8 GPU hours per repeat on this machine. Every record in `results/raw/` stores the git commit, versions, model revision, engine settings, KV cache capacity, idle baseline and the GPU processes seen at start.
+The full grid took about 7 GPU hours per repeat (6.9 h of sweep time in the records, plus model loading). Every record in `results/raw/` stores the git commit, versions, model revision, engine settings, KV cache capacity, idle baseline and the GPU processes seen at start.
