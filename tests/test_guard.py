@@ -6,10 +6,14 @@ from decode_sol.guard import (
     MAX_GPU_MEMORY_UTILIZATION,
     GpuMemoryCapError,
     GpuProcess,
+    NodeLoad,
     collect_run_metadata,
+    compute_cpu_busy_fraction,
     find_gpu_busy_reason,
     parse_compute_apps_csv,
+    parse_cpu_jiffies,
     parse_gpu_memory_utilization,
+    parse_mem_available_gib,
 )
 
 
@@ -76,3 +80,33 @@ def test_collect_run_metadata_records_commit_and_versions() -> None:
     assert re.fullmatch(r"[0-9a-f]{40}", str(metadata["git_commit"]))
     assert metadata["gpu_name"] == "NVIDIA GB10"
     assert isinstance(metadata["vllm_version"], str)
+
+
+def test_mem_available_is_read_from_meminfo_in_gib() -> None:
+    meminfo_text = "MemTotal:       131072000 kB\nMemAvailable:    2097152 kB\n"
+
+    assert parse_mem_available_gib(meminfo_text) == 2.0
+
+
+def test_mem_available_raises_without_its_line() -> None:
+    with pytest.raises(ValueError, match="MemAvailable"):
+        parse_mem_available_gib("MemTotal: 1 kB\n")
+
+
+def test_cpu_jiffies_count_idle_and_iowait_as_not_busy() -> None:
+    proc_stat_text = "cpu  10 1 5 80 4 0 0 0 0 0\ncpu0 10 1 5 80 4 0 0 0 0 0\n"
+
+    busy_jiffies, total_jiffies = parse_cpu_jiffies(proc_stat_text)
+
+    assert (busy_jiffies, total_jiffies) == (16, 100)
+
+
+def test_cpu_busy_fraction_uses_the_change_between_readings() -> None:
+    before = NodeLoad(
+        load_average_1min=1.0, mem_available_gib=100.0, cpu_busy_jiffies=50, cpu_total_jiffies=1_000
+    )
+    after = NodeLoad(
+        load_average_1min=1.0, mem_available_gib=100.0, cpu_busy_jiffies=80, cpu_total_jiffies=1_100
+    )
+
+    assert compute_cpu_busy_fraction(before, after) == pytest.approx(0.3)

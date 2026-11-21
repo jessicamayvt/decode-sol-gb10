@@ -11,6 +11,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from importlib.metadata import version
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,10 @@ MAX_GPU_MEMORY_UTILIZATION = 0.25
 # Idle reads 0%. Anything above this with no visible process means a user NVML hides from us.
 BUSY_GPU_UTILIZATION_PERCENT = 10
 NVIDIA_SMI_TIMEOUT_S = 30
+KIB_PER_GIB = 2**20
+# Columns of the cpu line in /proc/stat after the label: user nice system idle iowait ...
+PROC_STAT_IDLE_FIELD = 3
+PROC_STAT_IOWAIT_FIELD = 4
 
 
 class GpuMemoryCapError(ValueError):
@@ -40,6 +45,20 @@ class GpuStatus:
     name: str
     driver_version: str
     utilization_percent: int
+
+
+@dataclass(frozen=True, slots=True)
+class NodeLoad:
+    """The node's CPU and memory state. The CPU shares the GPU's memory bus on the GB10.
+
+    The jiffy counters are cumulative since boot; diff two readings with
+    compute_cpu_busy_fraction.
+    """
+
+    load_average_1min: float
+    mem_available_gib: float
+    cpu_busy_jiffies: int
+    cpu_total_jiffies: int
 
 
 def parse_gpu_memory_utilization(gpu_memory_utilization: float) -> float:
@@ -107,6 +126,44 @@ def load_gpu_status() -> GpuStatus:
     )
 
 
+def parse_mem_available_gib(meminfo_text: str) -> float:
+    for line in meminfo_text.splitlines():
+        if line.startswith("MemAvailable:"):
+            return int(line.split()[1]) / KIB_PER_GIB
+    raise ValueError("no MemAvailable line in /proc/meminfo")
+
+
+def parse_cpu_jiffies(proc_stat_text: str) -> tuple[int, int]:
+    """(busy, total) jiffies over all CPUs, from the first line of /proc/stat.
+
+    Idle and iowait count as not busy.
+    """
+    fields = proc_stat_text.splitlines()[0].split()
+    if fields[0] != "cpu":
+        raise ValueError(f"first line of /proc/stat is not the cpu total: {fields[0]!r}")
+    jiffies = [int(field) for field in fields[1:]]
+    idle_jiffies = jiffies[PROC_STAT_IDLE_FIELD] + jiffies[PROC_STAT_IOWAIT_FIELD]
+    total_jiffies = sum(jiffies)
+    return total_jiffies - idle_jiffies, total_jiffies
+
+
+def load_node_load() -> NodeLoad:
+    cpu_busy_jiffies, cpu_total_jiffies = parse_cpu_jiffies(Path("/proc/stat").read_text())
+    return NodeLoad(
+        load_average_1min=os.getloadavg()[0],
+        mem_available_gib=parse_mem_available_gib(Path("/proc/meminfo").read_text()),
+        cpu_busy_jiffies=cpu_busy_jiffies,
+        cpu_total_jiffies=cpu_total_jiffies,
+    )
+
+
+def compute_cpu_busy_fraction(before: NodeLoad, after: NodeLoad) -> float:
+    """Fraction of all the node's CPU time between two readings that was busy, ours included."""
+    busy_jiffies = after.cpu_busy_jiffies - before.cpu_busy_jiffies
+    total_jiffies = after.cpu_total_jiffies - before.cpu_total_jiffies
+    return busy_jiffies / total_jiffies
+
+
 def ensure_gpu_is_free() -> None:
     """Raise GpuBusyError if anyone else is using the GPU."""
     processes = load_gpu_processes()
@@ -153,6 +210,7 @@ def collect_run_metadata() -> dict[str, object]:
         "driver_version": status.driver_version,
         "gpu_utilization_percent_at_start": status.utilization_percent,
         "other_gpu_processes_at_start": other_processes,
+        "node_load_at_start": asdict(load_node_load()),
         "cuda_version": torch.version.cuda,
         "torch_version": version("torch"),
         "triton_version": version("triton"),

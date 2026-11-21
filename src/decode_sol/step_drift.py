@@ -10,9 +10,10 @@ the way measure.py does, then:
   soak      measures the point over and over for --minutes.
 
 Each measurement appends one record with the step time of every timed pair, the GPU power
-of the long generations, and the GPU temperature, SM clock and clock-event reasons before
-and after. A run takes 15-25 minutes for fresh and scramble, longer for soak, so wrap it in
-`timeout` with room to spare (see docs/REPORT.md for the runs behind
+of the long generations, the GPU temperature, SM clock and clock-event reasons before and
+after, and the node's load: other users' CPU jobs share the GPU's memory bus. A run takes
+15-25 minutes for fresh and scramble, longer for soak, so wrap it in `timeout` with room
+to spare (see docs/REPORT.md for the runs behind
 results/raw/fp8_gap_check.jsonl).
 """
 
@@ -38,7 +39,13 @@ from decode_sol.grid import (
     GridPoint,
     find_skip_reason,
 )
-from decode_sol.guard import collect_run_metadata, ensure_gpu_is_free, parse_gpu_memory_utilization
+from decode_sol.guard import (
+    collect_run_metadata,
+    compute_cpu_busy_fraction,
+    ensure_gpu_is_free,
+    load_node_load,
+    parse_gpu_memory_utilization,
+)
 from decode_sol.measure import (
     PROMPT_SEED,
     SweepConfig,
@@ -141,8 +148,11 @@ def measure_and_append(
     process_start_s: float,
 ) -> None:
     gpu_state_before = load_gpu_state(device)
+    node_load_before = load_node_load()
     raw_pairs = measure_point(llm, config.point, num_token_ids=num_token_ids, device=device)
     gpu_state_after = load_gpu_state(device)
+    node_load_after = load_node_load()
+    cpu_busy_fraction = compute_cpu_busy_fraction(node_load_before, node_load_after)
     step_times_ms = compute_step_times_ms(raw_pairs)
     median_step_ms = statistics.median(step_times_ms)
     elapsed_min = (time.monotonic() - process_start_s) / S_PER_MIN
@@ -156,21 +166,28 @@ def measure_and_append(
             "median_long_power_w": statistics.median(compute_long_generation_power_w(raw_pairs)),
             "gpu_state_before": asdict(gpu_state_before),
             "gpu_state_after": asdict(gpu_state_after),
+            "node_load_before": asdict(node_load_before),
+            "node_load_after": asdict(node_load_after),
+            "node_cpu_busy_fraction": cpu_busy_fraction,
         },
         config.sweep.output,
     )
     logger.info(
-        "mode=%s elapsed_min=%.1f median_step_ms=%.2f temp_c=%d sm_clock_mhz=%d",
+        "mode=%s elapsed_min=%.1f median_step_ms=%.2f temp_c=%d sm_clock_mhz=%d"
+        " node_cpu_busy_fraction=%.3f",
         config.mode.value,
         elapsed_min,
         median_step_ms,
         gpu_state_after.temp_c,
         gpu_state_after.sm_clock_mhz,
+        cpu_busy_fraction,
     )
 
 
 def parse_drift_config() -> DriftConfig:
-    parser = argparse.ArgumentParser(description="Measure one grid point fresh, scrambled or soaked.")
+    parser = argparse.ArgumentParser(
+        description="Measure one grid point fresh, scrambled or soaked."
+    )
     parser.add_argument("--model", required=True)
     parser.add_argument("--kv-cache-dtype", choices=["auto", "fp8"], default="auto")
     parser.add_argument("--batch-size", type=int, required=True)
@@ -191,7 +208,9 @@ def parse_drift_config() -> DriftConfig:
     )
     if point not in sweep.grid.points:
         parser.error(f"{point} is not in the full grid")
-    return DriftConfig(sweep=sweep, point=point, mode=DriftMode(args.mode), soak_minutes=args.minutes)
+    return DriftConfig(
+        sweep=sweep, point=point, mode=DriftMode(args.mode), soak_minutes=args.minutes
+    )
 
 
 def collect_process_metadata(config: DriftConfig) -> dict[str, object]:

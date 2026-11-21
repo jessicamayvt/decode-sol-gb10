@@ -7,9 +7,7 @@ NUM_EXTRA_STEPS = LONG_OUTPUT_LEN - SHORT_OUTPUT_LEN
 NS_PER_MS = 1_000_000
 
 
-def make_raw_pair(
-    *, short_ms: int, long_ms: int, long_energy_mj: int
-) -> dict[str, dict[str, int]]:
+def make_raw_pair(*, short_ms: int, long_ms: int, long_energy_mj: int) -> dict[str, dict[str, int]]:
     return {
         "short": {
             "start_energy_mj": 0,
