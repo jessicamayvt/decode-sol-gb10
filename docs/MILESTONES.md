@@ -143,3 +143,27 @@ The last term grows with batch size × weights, the shape of the matmul arithmet
 - **Kernel time per step comes from the GPU clock.** The LM head and sampling launch after vLLM's NVTX range for the step closes. So a step runs from its first kernel to the next step's first kernel, not to the end of the range.
 - **Commit labels.** The first top-up record names `52e8a33`. That commit was later rewritten as `e306709` to change only its message, and the code is identical. All top-up records have `has_uncommitted_changes: false`.
 - **Sanity checks still pass.** Efficiency is 0.667–0.929, so no point beats the ceiling.
+
+## M5: Write-up
+
+**Commits:** `9684765` (report and `vllm bench` issue drafts), `b221826` (profile read bandwidths), `38a4fa9` (fp8 gap check results), `71b083b` (report corrections), `92bc84b` (`step_drift.py`)
+
+- `docs/REPORT.md` answers the four questions: setup and caveats, the model, the results, the gap analysis, what would change on datacenter GPUs, and how to reproduce it. `docs/VLLM_ISSUE_DRAFT.md` drafts the issue proposing GPU energy in `vllm bench`. It is not filed.
+- `profile_summary.py` now stores the weight and KV cache read bandwidth of every profile, so the report's bandwidths trace to `results/profile_summary.json`. Every number in the report was traced to a file in `results/`, and the ones that did not match were corrected, here and in M4.
+- `step_drift.py` measures one grid point fresh, after scrambling the KV cache blocks, or over and over (soak). It is the cleaned-up form of the one-off script that wrote `results/raw/fp8_gap_check.jsonl`.
+
+### The fp8 gap
+
+M4 found Qwen3-4B fp8 at batch 4, context 32768 measured 3.6% slower than profiled (76.38 vs 73.62 ms). Follow-up runs on 2026-11-20 (`results/raw/fp8_gap_check.jsonl`; the `_blackwell1`, `_blackwell2` and `_kepler` profiles):
+
+1. **In a fresh process, measurement and profile agree.** Blackwell: 74.09 ms measured, 73.44 and 73.64 ms profiled. Kepler: 75.47 ms measured, 75.10 ms profiled.
+2. **Kepler is slower than blackwell.** Kepler is a different GB10 node. It is about 2% slower at this point, all in FlashInfer's `kernel_mha`, which reads the KV cache at 234 GB/s against 244–245 GB/s on blackwell. Its matmuls are as fast. The sweeps themselves ran on blackwell, pascal and fermi, so differences between nodes are part of the spread between repeats.
+3. **Long runs get slower.** The point is the last of its sweep, about 69 minutes in. Blackwell: 74.09 ms fresh, 76.34 ms at the end of a sweep (3.0%). Kepler soak: 75.27 → 75.94 ms over 69 minutes (0.9%).
+4. **Not heat, clocks or KV block placement.** At most 72 °C, about 2400 MHz, no clock-event reasons. A scrambled KV cache gave 75.17 ms on kepler, the same as fresh.
+
+Why long runs get slower is still open.
+
+### Notes
+
+- **Run rules.** The fp8 gap checks ran outside `run_sweep.sh`, with 20–80 minute timeouts. The human approved this for the check.
+- **Profiles on two hosts.** `profiles/nsys/` holds the M4 blackwell profile of the fp8 point under its usual name; the new ones carry a host suffix.
