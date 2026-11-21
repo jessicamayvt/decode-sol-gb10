@@ -8,6 +8,12 @@ the way measure.py does, then:
             order, so the KV cache blocks are handed out as scattered as in a sweep, then
             measures the point.
   soak      measures the point over and over for --minutes.
+  block_order
+            measures the point fresh, then again after measuring every earlier point of
+            the sweep (as a sweep does), after putting vLLM's free KV cache blocks back in
+            block id order, and after shuffling them. Each record stores how scattered the
+            blocks the point gets are (see block_order.py). Runs the engine in this
+            process. About two hours.
 
 Each measurement appends one record with the step time of every timed pair, the GPU power
 of the long generations, the GPU temperature, SM clock and clock-event reasons before and
@@ -18,7 +24,9 @@ results/raw/fp8_gap_check.jsonl).
 """
 
 import argparse
+import functools
 import logging
+import os
 import statistics
 import time
 from dataclasses import asdict, dataclass
@@ -31,12 +39,20 @@ from huggingface_hub import HfApi
 from vllm import LLM, SamplingParams
 
 from decode_sol.analyze import compute_decode_step_time_s, to_paired_generation
+from decode_sol.block_order import (
+    compute_num_contiguous_runs,
+    get_block_pool,
+    load_head_free_block_ids,
+    shuffle_free_block_queue,
+    sort_free_block_queue,
+)
 from decode_sol.energy import open_nvml_device
 from decode_sol.grid import (
     LONG_OUTPUT_LEN,
     NUM_WARMUP_PAIRS,
     SHORT_OUTPUT_LEN,
     GridPoint,
+    compute_num_blocks_needed,
     find_skip_reason,
 )
 from decode_sol.guard import (
@@ -59,12 +75,21 @@ logger = logging.getLogger(__name__)
 
 MS_PER_S = 1e3
 S_PER_MIN = 60.0
+BLOCK_SHUFFLE_SEED = 0
 
 
 class DriftMode(Enum):
     FRESH = "fresh"
     SCRAMBLE = "scramble"
     SOAK = "soak"
+    BLOCK_ORDER = "block_order"
+
+
+class BlockOrderStage(Enum):
+    FRESH = "fresh"
+    AFTER_SWEEP_HISTORY = "after_sweep_history"
+    SORTED = "sorted"
+    SHUFFLED = "shuffled"
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +177,7 @@ def measure_and_append(
     num_token_ids: int,
     process_metadata: dict[str, object],
     process_start_s: float,
+    extra_fields: dict[str, object],
 ) -> None:
     gpu_state_before = load_gpu_state(device)
     node_load_before = load_node_load()
@@ -175,6 +201,7 @@ def measure_and_append(
             "node_load_before": asdict(node_load_before),
             "node_load_after": asdict(node_load_after),
             "node_cpu_busy_fraction": cpu_busy_fraction,
+            **extra_fields,
         },
         config.sweep.output,
     )
@@ -190,9 +217,79 @@ def measure_and_append(
     )
 
 
+def measure_block_order_stage(
+    llm: LLM,
+    config: DriftConfig,
+    stage: BlockOrderStage,
+    *,
+    device: object,
+    num_token_ids: int,
+    process_metadata: dict[str, object],
+    process_start_s: float,
+) -> None:
+    """Measure the point, recording how scattered the blocks it is about to get are."""
+    block_size = llm.llm_engine.vllm_config.cache_config.block_size
+    num_blocks_needed = compute_num_blocks_needed(config.point, block_size=block_size)
+    head_block_ids = load_head_free_block_ids(get_block_pool(llm), num_blocks=num_blocks_needed)
+    measure_and_append(
+        llm,
+        config,
+        device=device,
+        num_token_ids=num_token_ids,
+        process_metadata=process_metadata,
+        process_start_s=process_start_s,
+        extra_fields={
+            "block_order_stage": stage.value,
+            "num_blocks_needed": num_blocks_needed,
+            "num_contiguous_runs_before": compute_num_contiguous_runs(head_block_ids),
+        },
+    )
+    head_block_ids_after = load_head_free_block_ids(
+        get_block_pool(llm), num_blocks=num_blocks_needed
+    )
+    logger.info(
+        "stage=%s num_contiguous_runs_after=%d",
+        stage.value,
+        compute_num_contiguous_runs(head_block_ids_after),
+    )
+
+
+def measure_block_order_stages(
+    llm: LLM,
+    config: DriftConfig,
+    *,
+    device: object,
+    num_token_ids: int,
+    process_metadata: dict[str, object],
+    process_start_s: float,
+) -> None:
+    """Fresh, after the sweep's earlier points, with the free blocks sorted, then shuffled."""
+    measure_stage = functools.partial(
+        measure_block_order_stage,
+        llm,
+        config,
+        device=device,
+        num_token_ids=num_token_ids,
+        process_metadata=process_metadata,
+        process_start_s=process_start_s,
+    )
+    measure_stage(BlockOrderStage.FRESH)
+
+    for point in find_earlier_feasible_points(llm, config):
+        measure_point(llm, point, num_token_ids=num_token_ids, device=device)
+        logger.info("Replayed %s", point)
+    measure_stage(BlockOrderStage.AFTER_SWEEP_HISTORY)
+
+    sort_free_block_queue(get_block_pool(llm))
+    measure_stage(BlockOrderStage.SORTED)
+
+    shuffle_free_block_queue(get_block_pool(llm), seed=BLOCK_SHUFFLE_SEED)
+    measure_stage(BlockOrderStage.SHUFFLED)
+
+
 def parse_drift_config() -> DriftConfig:
     parser = argparse.ArgumentParser(
-        description="Measure one grid point fresh, scrambled or soaked."
+        description="Measure one grid point fresh, scrambled, soaked or with reordered KV blocks."
     )
     parser.add_argument("--model", required=True)
     parser.add_argument("--kv-cache-dtype", choices=["auto", "fp8"], default="auto")
@@ -233,6 +330,7 @@ def collect_process_metadata(config: DriftConfig) -> dict[str, object]:
         "num_warmup_pairs": NUM_WARMUP_PAIRS,
         "measured_with": "decode_sol.step_drift",
         "process_start_local": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "vllm_v1_multiprocessing": config.mode is not DriftMode.BLOCK_ORDER,
     }
 
 
@@ -240,6 +338,9 @@ def main() -> None:
     config = parse_drift_config()
     logging.basicConfig(level=logging.INFO)
 
+    if config.mode is DriftMode.BLOCK_ORDER:
+        # block_order.py reaches into the scheduler, so the engine must run in this process.
+        os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
     ensure_gpu_is_free()
     process_metadata = collect_process_metadata(config)
     revision = HfApi().model_info(config.sweep.model).sha
@@ -250,6 +351,16 @@ def main() -> None:
     process_start_s = time.monotonic()
 
     with open_nvml_device() as device:
+        if config.mode is DriftMode.BLOCK_ORDER:
+            measure_block_order_stages(
+                llm,
+                config,
+                device=device,
+                num_token_ids=num_token_ids,
+                process_metadata=process_metadata,
+                process_start_s=process_start_s,
+            )
+            return
         if config.mode is DriftMode.SCRAMBLE:
             scramble_kv_cache_blocks(llm, config, num_token_ids=num_token_ids)
         while True:
@@ -260,6 +371,7 @@ def main() -> None:
                 num_token_ids=num_token_ids,
                 process_metadata=process_metadata,
                 process_start_s=process_start_s,
+                extra_fields={},
             )
             elapsed_min = (time.monotonic() - process_start_s) / S_PER_MIN
             if config.mode is not DriftMode.SOAK or elapsed_min >= config.soak_minutes:

@@ -52,7 +52,8 @@ Load the matching skill before starting the work, not after.
 | `src/decode_sol/plots.py` | Every figure |
 | `src/decode_sol/profile_summary.py` | Top kernels and GPU idle time per decode step, from nsys profiles |
 | `src/decode_sol/profile_decode.py` | Profiles decode steps at one grid point (torch profiler or nsys) |
-| `src/decode_sol/step_drift.py` | One grid point fresh, after scrambling the KV cache, or over and over, to separate a slow point from a slow process |
+| `src/decode_sol/step_drift.py` | One grid point fresh, after scrambling the KV cache, over and over, or with vLLM's free KV cache blocks reordered, to separate a slow point from a slow process |
+| `src/decode_sol/block_order.py` | Reads, sorts and shuffles vLLM's free KV cache block queue (engine in this process only) |
 | `scripts/` | `setup_env.sh`, `run_sweep.sh`, `run_profile.sh` |
 | `results/raw/` | Append-only measurement records. Never edit or delete them. |
 | `docs/` | Brief, model derivation, setup notes, report draft |
