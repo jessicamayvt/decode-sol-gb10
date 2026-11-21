@@ -2,17 +2,20 @@
 # The only way to start a profile: sets the environment, shows who else is on the GPU, runs
 # one grid point under a timeout and checks that nothing is left running.
 #
-# Usage: bash scripts/run_profile.sh [--timeout 20m] [--nsys] --model <id> --batch-size <n>
-#            --context-len <n> [--kv-cache-dtype auto|fp8]
+# Usage: bash scripts/run_profile.sh [--timeout 20m] [--nsys] [--label <label>] --model <id>
+#            --batch-size <n> --context-len <n> [--kv-cache-dtype auto|fp8] [--soak-minutes <m>]
 # Without --nsys, vLLM's torch profiler writes traces under profiles/torch/. With --nsys, the
 # profiled decode steps are recorded by Nsight Systems into profiles/nsys/, named like the torch
 # traces, and exported to SQLite for `python -m decode_sol.profile_summary`.
-# Everything except --timeout and --nsys is passed to `python -m decode_sol.profile_decode`.
+# --label appends _<label> to the nsys report name, so a second profile of a point (another
+# host, a soak) does not overwrite the first. Everything except --timeout, --nsys and --label
+# is passed to `python -m decode_sol.profile_decode`.
 set -euo pipefail
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 timeout_duration=20m
 use_nsys=false
+label=
 kv_cache_dtype=auto
 profile_args=()
 while [[ $# -gt 0 ]]; do
@@ -28,6 +31,10 @@ while [[ $# -gt 0 ]]; do
         --nsys)
             use_nsys=true
             shift
+            ;;
+        --label)
+            label=_$2
+            shift 2
             ;;
         *)
             profile_args+=("$1")
@@ -48,7 +55,7 @@ command=(python -m decode_sol.profile_decode "${profile_args[@]}")
 if [[ $use_nsys == true ]]; then
     mkdir -p profiles/nsys
     # Same name as ProfileConfig.trace_prefix in profile_decode.py.
-    report_name=${model##*/}_${kv_cache_dtype}_b${batch_size}_c${context_len}
+    report_name=${model##*/}_${kv_cache_dtype}_b${batch_size}_c${context_len}${label}
     # Records only between cudaProfilerStart/Stop. vLLM's engine runs in a forked process,
     # and decode replays CUDA graphs, so trace through the fork and inside each graph.
     command=(/usr/local/cuda/bin/nsys profile --output "profiles/nsys/$report_name" --force-overwrite=true

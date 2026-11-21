@@ -3,20 +3,34 @@
 Uses the GPU: start it only through scripts/run_profile.sh. The torch profiler writes a
 trace and a table of kernels by CUDA time under --output-dir. The cuda profiler only marks
 the profiled steps, for `nsys profile --capture-range=cudaProfilerApi` to record.
+
+With --soak-minutes, the point is first measured over and over as in a sweep, so the
+profile shows a process that has run that long.
 """
 
 import argparse
 import logging
+import statistics
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, assert_never
 
 from huggingface_hub import HfApi
-from vllm import SamplingParams
+from vllm import LLM, SamplingParams
 from vllm.config import ProfilerConfig
 
+from decode_sol.energy import open_nvml_device
+from decode_sol.grid import GridPoint
 from decode_sol.guard import ensure_gpu_is_free, parse_gpu_memory_utilization
-from decode_sol.measure import PROMPT_SEED, SweepConfig, load_llm, make_random_prompts
+from decode_sol.measure import (
+    PROMPT_SEED,
+    SweepConfig,
+    load_llm,
+    make_random_prompts,
+    measure_point,
+)
+from decode_sol.step_drift import S_PER_MIN, compute_step_times_ms
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +51,7 @@ class ProfileConfig:
     profiler: ProfilerKind
     output_dir: Path
     gpu_memory_utilization: float
+    soak_minutes: float
 
     @property
     def trace_prefix(self) -> str:
@@ -53,6 +68,9 @@ def parse_profile_config() -> ProfileConfig:
     parser.add_argument("--profiler", choices=["torch", "cuda"], required=True)
     parser.add_argument("--output-dir", type=Path, default=Path("profiles"))
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.25)
+    parser.add_argument(
+        "--soak-minutes", type=float, default=0.0, help="measure the point this long first"
+    )
     args = parser.parse_args()
     return ProfileConfig(
         model=args.model,
@@ -62,6 +80,7 @@ def parse_profile_config() -> ProfileConfig:
         profiler=args.profiler,
         output_dir=args.output_dir.resolve(),
         gpu_memory_utilization=parse_gpu_memory_utilization(args.gpu_memory_utilization),
+        soak_minutes=args.soak_minutes,
     )
 
 
@@ -81,6 +100,20 @@ def to_vllm_profiler_config(config: ProfileConfig) -> ProfilerConfig:
             assert_never(config.profiler)
 
 
+def soak_point(llm: LLM, config: ProfileConfig, *, num_token_ids: int) -> None:
+    """Measure the point the way measure.py does, over and over, for config.soak_minutes."""
+    point = GridPoint(batch_size=config.batch_size, context_len=config.context_len)
+    start_s = time.monotonic()
+    with open_nvml_device() as device:
+        while (time.monotonic() - start_s) / S_PER_MIN < config.soak_minutes:
+            raw_pairs = measure_point(llm, point, num_token_ids=num_token_ids, device=device)
+            logger.info(
+                "Soak: elapsed_min=%.1f median_step_ms=%.2f",
+                (time.monotonic() - start_s) / S_PER_MIN,
+                statistics.median(compute_step_times_ms(raw_pairs)),
+            )
+
+
 def main() -> None:
     config = parse_profile_config()
     logging.basicConfig(level=logging.INFO)
@@ -98,10 +131,12 @@ def main() -> None:
         points=(),  # Nor measures any.
     )
     llm = load_llm(sweep_config, revision=revision, profiler_config=to_vllm_profiler_config(config))
+    num_token_ids = llm.get_tokenizer().vocab_size
+    soak_point(llm, config, num_token_ids=num_token_ids)
     prompts = make_random_prompts(
         batch_size=config.batch_size,
         context_len=config.context_len,
-        num_token_ids=llm.get_tokenizer().vocab_size,
+        num_token_ids=num_token_ids,
         seed=PROMPT_SEED,
     )
     num_output_tokens = NUM_PREFILL_ITERATIONS + NUM_PROFILED_DECODE_STEPS

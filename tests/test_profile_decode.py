@@ -15,6 +15,7 @@ def test_vllm_accepts_the_profiler_config_for_each_profiler(profiler: ProfilerKi
         profiler=profiler,
         output_dir=Path("/tmp/profiles"),
         gpu_memory_utilization=0.25,
+        soak_minutes=0.0,
     )
 
     vllm_profiler_config = to_vllm_profiler_config(config)
