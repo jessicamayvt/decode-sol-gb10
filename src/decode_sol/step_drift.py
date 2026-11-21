@@ -109,24 +109,31 @@ def compute_long_generation_power_w(raw_pairs: list[dict[str, dict[str, int]]]) 
     return power_w
 
 
-def scramble_kv_cache_blocks(llm: LLM, config: DriftConfig, *, num_token_ids: int) -> None:
-    """Run one short generation at every feasible grid point before config.point."""
+def find_earlier_feasible_points(llm: LLM, config: DriftConfig) -> list[GridPoint]:
+    """The feasible grid points a sweep measures before config.point, in sweep order."""
     cache_config = llm.llm_engine.vllm_config.cache_config
     num_gpu_blocks = cache_config.num_gpu_blocks
     if num_gpu_blocks is None:
         raise RuntimeError("vLLM did not report its KV cache size")
-    sampling_params = SamplingParams(temperature=0.0, max_tokens=SHORT_OUTPUT_LEN, ignore_eos=True)
+    earlier_points: list[GridPoint] = []
     for point in config.sweep.grid.points:
         if point == config.point:
-            return
+            return earlier_points
         skip_reason = find_skip_reason(
             point,
             num_gpu_blocks=num_gpu_blocks,
             block_size=cache_config.block_size,
             max_num_batched_tokens=config.sweep.grid.max_num_batched_tokens,
         )
-        if skip_reason is not None:
-            continue
+        if skip_reason is None:
+            earlier_points.append(point)
+    raise ValueError(f"{config.point} is not in grid {config.sweep.grid_name!r}")
+
+
+def scramble_kv_cache_blocks(llm: LLM, config: DriftConfig, *, num_token_ids: int) -> None:
+    """Run one short generation at every feasible grid point before config.point."""
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=SHORT_OUTPUT_LEN, ignore_eos=True)
+    for point in find_earlier_feasible_points(llm, config):
         prompts = make_random_prompts(
             batch_size=point.batch_size,
             context_len=point.context_len,
@@ -135,7 +142,6 @@ def scramble_kv_cache_blocks(llm: LLM, config: DriftConfig, *, num_token_ids: in
         )
         llm.generate(prompts, sampling_params, use_tqdm=False)
         logger.info("Scrambled with %s", point)
-    raise ValueError(f"{config.point} is not in grid {config.sweep.grid_name!r}")
 
 
 def measure_and_append(
