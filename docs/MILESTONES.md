@@ -146,7 +146,7 @@ The last term grows with batch size × weights, the shape of the matmul arithmet
 
 ## M5: Write-up
 
-**Commits:** `9684765` (report and `vllm bench` issue drafts), `b221826` (profile read bandwidths), `38a4fa9` (fp8 gap check results), `71b083b` (report corrections), `92bc84b` (`step_drift.py`)
+**Commits:** `9684765` (report and `vllm bench` issue drafts), `b221826` (profile read bandwidths), `38a4fa9` (fp8 gap check results), `71b083b` (report corrections), `92bc84b` (`step_drift.py`), `3ab3aba` (node differences, this section), `c6ff854` (node load in records), `da0141a` (soak profiles), `2fbe1ae` (soak, restart and bandwidth results)
 
 - `docs/REPORT.md` answers the four questions: setup and caveats, the model, the results, the gap analysis, what would change on datacenter GPUs, and how to reproduce it. `docs/VLLM_ISSUE_DRAFT.md` drafts the issue proposing GPU energy in `vllm bench`. It is not filed.
 - `profile_summary.py` now stores the weight and KV cache read bandwidth of every profile, so the report's bandwidths trace to `results/profile_summary.json`. Every number in the report was traced to a file in `results/`, and the ones that did not match were corrected, here and in M4.
@@ -160,10 +160,14 @@ M4 found Qwen3-4B fp8 at batch 4, context 32768 measured 3.6% slower than profil
 2. **Kepler is slower than blackwell.** Kepler is a different GB10 node. It is about 2% slower at this point, all in FlashInfer's `kernel_mha`, which reads the KV cache at 234 GB/s against 244–245 GB/s on blackwell. Its matmuls are as fast. The sweeps themselves ran on blackwell, pascal and fermi, so differences between nodes are part of the spread between repeats.
 3. **Long runs get slower.** The point is the last of its sweep, about 69 minutes in. Blackwell: 74.09 ms fresh, 76.34 ms at the end of a sweep (3.0%). Kepler soak: 75.27 → 75.94 ms over 69 minutes (0.9%).
 4. **Not heat, clocks or KV block placement.** At most 72 °C, about 2400 MHz, no clock-event reasons. A scrambled KV cache gave 75.17 ms on kepler, the same as fresh.
+5. **The slowdown is in the process.** Follow-up on 2026-11-20 and 21, on blackwell: a 68-minute soak went 74.13 → 74.50 ms (0.5%), and a new process right after measured 74.17 ms. The node's CPU was under 1% busy throughout.
+6. **It is in FlashInfer's attention kernel.** A profile taken after 69 minutes of soak (`_soak69`) has a 74.52 ms step against 73.44–73.64 ms fresh. Attention takes 40.33 against 39.46–39.54 ms per step (KV cache at 240 against 244–245 GB/s); matmuls and GPU idle barely change. Kepler's 2% is in the same kernel.
+7. **Achievable bandwidth drifts.** The same plain-read benchmark gave 265.1 GB/s on blackwell on 2026-11-13 (a day after boot), and 258.9–261.4 GB/s on blackwell and 261.1 GB/s on kepler on 2026-11-20 and 21 (`results/raw/bandwidth_by_node.jsonl`). The roofline still uses 265.1 GB/s.
 
-Why long runs get slower is still open.
+Why the attention kernel slows in a long-running process is still open. One point repeated for an hour gives 0.5–0.9%, a sweep 3.0%, so the sweep's mix of earlier points seems to matter more than time.
 
 ### Notes
 
-- **Run rules.** The fp8 gap checks ran outside `run_sweep.sh`, with 20–80 minute timeouts. The human approved this for the check.
+- **Run rules.** The fp8 gap checks ran outside `run_sweep.sh`, with 20–95 minute timeouts. The human approved this for the check.
+- **New bandwidth file.** Per-node bandwidth goes to `results/raw/bandwidth_by_node.jsonl`, because `analyze.py` takes the ceiling from the last line of `results/raw/bandwidth.jsonl`.
 - **Profiles on two hosts.** `profiles/nsys/` holds the M4 blackwell profile of the fp8 point under its usual name; the new ones carry a host suffix.
